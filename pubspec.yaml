@@ -1,0 +1,31 @@
+name: cinevault
+description: "CineVault — Movie & TV Discovery and Personal Watchlist Management"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_dotenv: ^5.2.1
+  fl_chart: ^0.69.0
+  flutter_svg: ^2.0.17
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  http: ^1.3.0
+  provider: ^6.1.2
+  palette_generator: ^0.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
+    - assets/images/branding/
