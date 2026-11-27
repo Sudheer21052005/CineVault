@@ -214,6 +214,15 @@ void main() {
       );
       await harness.repo.episode(_episode);
       expect(harness.requests.last.path, '/3/tv/1396/season/1/episode/1');
+      await harness.repo.episodeImages(_episode);
+      expect(
+        harness.requests.last.path,
+        '/3/tv/1396/season/1/episode/1/images',
+      );
+      expect(
+        harness.requests.last.queryParameters['include_image_language'],
+        'en,null',
+      );
 
       final person = await harness.repo.universalSearch(
         'Nolan',

@@ -431,6 +431,7 @@ class CatalogueRepository {
     bool refresh = false,
   }) => _knowledge(
     '/tv/${ref.seriesId}/season/${ref.seasonNumber}/episode/${ref.episodeNumber}/images',
+    query: const {'include_image_language': 'en,null'},
     refresh: refresh,
   );
 
