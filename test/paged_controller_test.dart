@@ -13,7 +13,7 @@ void main() {
   testWidgets('clear and debounce invalidate an old result immediately', (
     tester,
   ) async {
-    final pages = PagedController();
+    final pages = PagedController<Media>();
     addTearDown(pages.dispose);
     final old = Completer<TmdbPage>();
     pages.setQuery((_, {required refresh}) => old.future);
@@ -39,7 +39,7 @@ void main() {
   testWidgets('a late old next page cannot append or lock the next query', (
     tester,
   ) async {
-    final pages = PagedController();
+    final pages = PagedController<Media>();
     addTearDown(pages.dispose);
     final late = Completer<TmdbPage>();
     pages.setQuery(
@@ -65,7 +65,7 @@ void main() {
   testWidgets(
     'failed refresh keeps previous items and next-page retry is fresh',
     (tester) async {
-      final pages = PagedController();
+      final pages = PagedController<Media>();
       addTearDown(pages.dispose);
       final fresh = <(int, bool)>[];
       var fail = false;

@@ -10,8 +10,9 @@ import '../core/performance.dart';
 enum ArtworkKind {
   poster('poster_sizes', PerfArea.poster, [92, 154, 185, 342, 500, 780]),
   backdrop('backdrop_sizes', PerfArea.backdrop, [300, 780, 1280]),
-  profile('profile_sizes', PerfArea.poster, [45, 185]),
-  still('still_sizes', PerfArea.backdrop, [92, 185, 300]);
+  profile('profile_sizes', PerfArea.poster, [45, 185, 421]),
+  still('still_sizes', PerfArea.backdrop, [92, 185, 300]),
+  logo('logo_sizes', PerfArea.poster, [45, 92, 154, 185, 300, 500]);
 
   const ArtworkKind(this.field, this.area, this.fallback);
   final String field;
@@ -53,10 +54,13 @@ class ArtworkPolicy extends ChangeNotifier {
           if (images[kind.field] case final List<dynamic> values)
             kind: <int>[
               for (final value in values.whereType<String>())
-                if (value.startsWith('w'))
-                  if (int.tryParse(value.substring(1)) case final int width
-                      when width > 0)
-                    width,
+                if (kind == ArtworkKind.profile && value == 'h632')
+                  421 // A 632-high portrait is about 421 pixels wide at 2:3.
+                else if ((value.startsWith('w')
+                        ? int.tryParse(value.substring(1))
+                        : null)
+                    case final int width when width > 0)
+                  width,
             ]..sort(),
       };
       notifyListeners();
@@ -79,8 +83,11 @@ class ArtworkPolicy extends ChangeNotifier {
     double ratio,
   ) {
     final variant = width(kind, logicalWidth, ratio);
+    final size = kind == ArtworkKind.profile && variant == 421
+        ? 'h632'
+        : 'w$variant';
     final image = NetworkImage(
-      '${_base}w$variant${path.startsWith('/') ? path : '/$path'}',
+      '$_base$size${path.startsWith('/') ? path : '/$path'}',
     );
     if (kIsWeb) return image;
     // Bucket decoded sizes with the CDN variant so equal artwork shares cache keys.

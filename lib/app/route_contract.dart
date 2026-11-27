@@ -1,5 +1,6 @@
 import '../catalogue/catalogue_repository.dart';
 import '../catalogue/entity_ref.dart';
+import '../catalogue/knowledge_models.dart';
 import '../core/performance.dart';
 
 enum AppTab {
@@ -84,11 +85,30 @@ class TitleRoute extends CineRoute {
 }
 
 class FilmographyRoute extends CineRoute {
-  const FilmographyRoute(this.personId);
+  const FilmographyRoute(
+    this.personId, {
+    this.filter = const FilmographyFilter(),
+  });
   final int personId;
+  final FilmographyFilter filter;
 
   @override
-  Uri get uri => Uri(path: '/person/$personId/filmography');
+  Uri get uri {
+    final genre = filter.genre;
+    final params = <String, String>{
+      if (filter.kind != null) 'kind': filter.kind!.name,
+      if (filter.role != null) 'role': filter.role!,
+      if (genre != null) 'genre': '${genre.kind.name}:${genre.id}',
+      if (filter.year != null) 'year': '${filter.year}',
+      if (filter.minimumVotes > 0) 'votes': '${filter.minimumVotes}',
+      if (filter.sort != FilmSort.popularity) 'sort': filter.sort.name,
+    };
+    return Uri(
+      path: '/person/$personId/filmography',
+      queryParameters: params.isEmpty ? null : params,
+    );
+  }
+
   @override
   PerfArea get area => PerfArea.entity;
 }
@@ -183,7 +203,37 @@ CineRoute parseCineRoute(Uri uri) {
       }
     case ['person', final id, 'filmography']:
       final number = _positive(id);
-      if (number != null) return FilmographyRoute(number);
+      if (number != null) {
+        final genreParts = params['genre']?.split(':');
+        final genreKind = MediaKind.parse(genreParts?.firstOrNull);
+        final genreId = genreParts?.length == 2
+            ? _positive(genreParts?.last)
+            : null;
+        final role = params['role']?.trim();
+        final year = _positive(params['year']);
+        return FilmographyRoute(
+          number,
+          filter: FilmographyFilter(
+            kind: MediaKind.parse(params['kind']),
+            role: role == null || role.isEmpty || role.length > 100
+                ? null
+                : role,
+            genre: genreKind != null && genreId != null
+                ? (kind: genreKind, id: genreId)
+                : null,
+            year: year != null && year >= 1000 && year <= 9999 ? year : null,
+            minimumVotes: (_positive(params['votes']) ?? 0).clamp(
+              0,
+              1000000000,
+            ),
+            sort:
+                FilmSort.values
+                    .where((sort) => sort.name == params['sort'])
+                    .firstOrNull ??
+                FilmSort.popularity,
+          ),
+        );
+      }
     case ['tv', final id, 'season', final season]:
       final ref = _season(id, season);
       if (ref != null) return SeasonRoute(ref);

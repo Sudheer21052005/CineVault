@@ -836,7 +836,7 @@ class DiscoveryPage extends StatefulWidget {
 }
 
 class _DiscoveryPageState extends State<DiscoveryPage> {
-  final _pages = PagedController();
+  final _pages = PagedController<Media>();
   @override
   void initState() {
     super.initState();
@@ -852,6 +852,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
   @override
   Widget build(BuildContext context) => PagedBrowseView(
     pages: _pages,
+    results: (items) => PosterGrid(heroPrefix: widget.title, items: items),
     heroPrefix: widget.title,
     emptyMessage: 'No titles available.',
     header: Column(

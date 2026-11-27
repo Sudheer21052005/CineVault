@@ -2,7 +2,7 @@ import '../catalogue/entity_ref.dart';
 
 typedef MediaGenre = ({int id, String name});
 
-class Media {
+class Media implements CatalogueItem {
   const Media({
     required this.id,
     required this.type,
@@ -22,6 +22,7 @@ class Media {
     this.tagline,
     this.releaseStatus,
     this.popularity = 0,
+    this.voteCount = 0,
   });
 
   final int id;
@@ -42,9 +43,11 @@ class Media {
   final String? tagline;
   final String? releaseStatus;
   final double popularity;
+  final int voteCount;
 
   bool get isMovie => type == 'movie';
   String get year => releaseDate?.year.toString() ?? 'TBA';
+  @override
   String get key => '$type-$id';
   EntityRef get ref =>
       (kind: (MediaKind.parse(type) ?? MediaKind.movie).entityKind, id: id);
@@ -92,6 +95,7 @@ class Media {
         ...detailedGenres.map((item) => item['id']).whereType<int>(),
       }),
       popularity: _num(json['popularity'])?.toDouble() ?? 0,
+      voteCount: _num(json['vote_count'])?.toInt() ?? 0,
     );
   }
 }

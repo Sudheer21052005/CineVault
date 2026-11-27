@@ -10,6 +10,7 @@ class CineArt extends StatelessWidget {
     required this.path,
     this.kind = ArtworkKind.poster,
     this.alignment = Alignment.center,
+    this.fit = BoxFit.cover,
     this.onReady,
     super.key,
   });
@@ -17,6 +18,7 @@ class CineArt extends StatelessWidget {
   final String? path;
   final ArtworkKind kind;
   final Alignment alignment;
+  final BoxFit fit;
   final VoidCallback? onReady;
 
   @override
@@ -39,6 +41,7 @@ class CineArt extends StatelessWidget {
           provider: provider,
           kind: kind,
           alignment: alignment,
+          fit: fit,
           onReady: onReady,
         );
       },
@@ -60,6 +63,7 @@ class _ProgressiveArt extends StatefulWidget {
     required this.provider,
     required this.kind,
     required this.alignment,
+    required this.fit,
     required this.onReady,
     super.key,
   });
@@ -67,6 +71,7 @@ class _ProgressiveArt extends StatefulWidget {
   final ImageProvider<Object> provider;
   final ArtworkKind kind;
   final Alignment alignment;
+  final BoxFit fit;
   final VoidCallback? onReady;
 
   @override
@@ -80,7 +85,7 @@ class _ProgressiveArtState extends State<_ProgressiveArt> {
   @override
   Widget build(BuildContext context) => Image(
     image: widget.provider,
-    fit: BoxFit.cover,
+    fit: widget.fit,
     alignment: widget.alignment,
     gaplessPlayback: true,
     filterQuality: FilterQuality.low,

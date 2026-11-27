@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../app/navigation_scope.dart';
 import '../app/route_contract.dart';
 import '../catalogue/catalogue_repository.dart';
+import '../catalogue/entity_ref.dart';
 import '../catalogue/paged_controller.dart';
 import '../core/material.dart';
 import '../core/network/tmdb_transport.dart';
@@ -164,12 +165,13 @@ class _ContentBadge extends StatelessWidget {
   );
 }
 
-class PagedBrowseView extends StatelessWidget {
+class PagedBrowseView<T extends CatalogueItem> extends StatelessWidget {
   const PagedBrowseView({
     required this.pages,
     required this.header,
     required this.heroPrefix,
     required this.emptyMessage,
+    required this.results,
     this.scrollKey,
     this.scroll,
     this.onFirstPaint,
@@ -178,7 +180,8 @@ class PagedBrowseView extends StatelessWidget {
     super.key,
   });
 
-  final PagedController pages;
+  final PagedController<T> pages;
+  final Widget Function(List<T>) results;
   final Widget header;
   final ScrollController? scroll;
   final PageStorageKey<String>? scrollKey;
@@ -230,7 +233,7 @@ class PagedBrowseView extends StatelessWidget {
             if (state.status == PageStatus.loading)
               PosterGrid(heroPrefix: heroPrefix, skeletons: 14)
             else if (state.items.isNotEmpty)
-              PosterGrid(heroPrefix: heroPrefix, items: state.items)
+              results(state.items)
             else if (state.status == PageStatus.ready)
               CineSliver(child: MessageState(message: emptyMessage)),
             if (state.loadingNext ||
@@ -262,6 +265,30 @@ class PosterGrid extends StatelessWidget {
   final String heroPrefix;
 
   @override
+  Widget build(BuildContext context) => CatalogueGrid(
+    count: skeletons ?? items.length,
+    itemBuilder: (_, index) => skeletons != null
+        ? const PosterSkeleton()
+        : PosterCard(
+            media: items[index],
+            heroTag: '$heroPrefix-${items[index].key}',
+          ),
+  );
+}
+
+class CatalogueGrid extends StatelessWidget {
+  const CatalogueGrid({
+    required this.count,
+    required this.itemBuilder,
+    this.extraHeight = 0,
+    super.key,
+  });
+
+  final int count;
+  final IndexedWidgetBuilder itemBuilder;
+  final double extraHeight;
+
+  @override
   Widget build(BuildContext context) {
     const gap = 14.0;
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
@@ -273,19 +300,15 @@ class PosterGrid extends StatelessWidget {
           final columns = cineColumns(extent, scale);
           final width = (extent - (columns - 1) * gap) / columns;
           return SliverGrid.builder(
-            itemCount: skeletons ?? items.length,
+            itemCount: count,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
               crossAxisSpacing: gap,
               mainAxisSpacing: 10,
-              mainAxisExtent: cineCardHeight(width, scale),
+              mainAxisExtent:
+                  cineCardHeight(width, scale) + extraHeight * scale,
             ),
-            itemBuilder: (_, index) => skeletons != null
-                ? const PosterSkeleton()
-                : PosterCard(
-                    media: items[index],
-                    heroTag: '$heroPrefix-${items[index].key}',
-                  ),
+            itemBuilder: itemBuilder,
           );
         },
       ),
@@ -317,8 +340,10 @@ class PosterSkeleton extends StatelessWidget {
   );
 }
 
-Widget nextPageAction(PagedController pages, PageState state) =>
-    state.loadingNext
+Widget nextPageAction<T extends CatalogueItem>(
+  PagedController<T> pages,
+  PageState<T> state,
+) => state.loadingNext
     ? const SizedBox.square(
         dimension: 24,
         child: CircularProgressIndicator(strokeWidth: 2),
@@ -341,7 +366,7 @@ class FeedShelf extends StatefulWidget {
 }
 
 class FeedShelfState extends State<FeedShelf> {
-  final _pages = PagedController();
+  final _pages = PagedController<Media>();
 
   @override
   void initState() {

@@ -7,6 +7,7 @@ class CineNavigation extends InheritedWidget {
     required this.open,
     required this.select,
     required this.updateSearch,
+    required this.replace,
     required this.back,
     required this.searchRequests,
     required super.child,
@@ -23,6 +24,7 @@ class CineNavigation extends InheritedWidget {
   open;
   final void Function(BuildContext, AppTab) select;
   final void Function(BuildContext, TabRoute) updateSearch;
+  final void Function(BuildContext, CineRoute) replace;
   final void Function(BuildContext) back;
   final ValueNotifier<int> searchRequests;
 

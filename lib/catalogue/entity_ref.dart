@@ -1,5 +1,9 @@
 enum EntityKind { movie, tv, person, collection, company, network, keyword }
 
+abstract interface class CatalogueItem {
+  String get key;
+}
+
 enum MediaKind {
   movie,
   tv;

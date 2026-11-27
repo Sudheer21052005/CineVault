@@ -30,7 +30,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    _visited.add(widget.tab);
+    if (!widget.covered) _visited.add(widget.tab);
     return IndexedStack(
       index: widget.tab.index,
       children: [
@@ -69,12 +69,14 @@ class ResponsiveShell extends StatelessWidget {
     required this.covered,
     required this.child,
     required this.onAbout,
+    this.routeLabel,
     super.key,
   });
   final AppTab tab;
   final bool covered;
   final Widget child;
   final VoidCallback onAbout;
+  final String? routeLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -119,6 +121,7 @@ class ResponsiveShell extends StatelessWidget {
                       _TopBar(
                         mobile: mobile,
                         active: tab,
+                        routeLabel: routeLabel,
                         search: search,
                         back: covered && !mobile
                             ? () => navigation.back(context)
@@ -244,11 +247,13 @@ class _TopBar extends StatelessWidget {
     required this.active,
     required this.search,
     this.back,
+    this.routeLabel,
   });
   final bool mobile;
   final AppTab active;
   final VoidCallback search;
   final VoidCallback? back;
+  final String? routeLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -277,7 +282,7 @@ class _TopBar extends StatelessWidget {
                 child: mobile
                     ? const CineBrand()
                     : Text(
-                        _section(active),
+                        routeLabel ?? _section(active),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

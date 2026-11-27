@@ -69,6 +69,15 @@ void main() {
       await tester.tap(find.text('Inception').first);
       await tester.pumpAndSettle();
       expect(find.text('Runtime: 148 minutes'), findsOneWidget);
+      expect(harness.tmdb.paths, isNot(contains('/3/movie/27205/similar')));
+      expect(
+        harness.tmdb.paths,
+        isNot(contains('/3/movie/27205/recommendations')),
+      );
+      await tester.ensureVisible(find.text('Similar movies'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Similar movies'));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('The Dark Knight').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('The Dark Knight').first);
@@ -77,7 +86,8 @@ void main() {
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.text('Runtime: 148 minutes'), findsOneWidget);
+      expect(find.text('Similar movies'), findsOneWidget);
+      expect(find.text('The Dark Knight').first.hitTestable(), findsOneWidget);
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       expect(find.text('Films in theatrical release.'), findsOneWidget);

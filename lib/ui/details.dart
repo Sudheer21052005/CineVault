@@ -7,12 +7,14 @@ import '../app/route_contract.dart';
 import '../catalogue/artwork_policy.dart';
 import '../catalogue/catalogue_repository.dart';
 import '../catalogue/entity_ref.dart';
+import '../catalogue/knowledge_models.dart';
 import '../core/material.dart';
 import '../models/media.dart';
 import 'artwork.dart';
 import 'catalogue_widgets.dart';
 import 'design_system.dart';
 import 'library.dart';
+import 'media_sections.dart';
 
 class MediaDetailsPage extends StatefulWidget {
   const MediaDetailsPage({
@@ -31,8 +33,8 @@ class MediaDetailsPage extends StatefulWidget {
 
 class _MediaDetailsPageState extends State<MediaDetailsPage> {
   late final _catalogue = context.read<CatalogueRepository>();
-  late Future<Media> _request;
-  Media? _lastGood;
+  late Future<TitleKnowledge> _request;
+  TitleKnowledge? _lastGood;
 
   @override
   void initState() {
@@ -40,15 +42,15 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
     _request = _fetch();
   }
 
-  Future<Media> _fetch({bool refresh = false}) async =>
-      _lastGood = await _catalogue.details(widget.ref, refresh: refresh);
+  Future<TitleKnowledge> _fetch({bool refresh = false}) async =>
+      _lastGood = await _catalogue.titleKnowledge(widget.ref, refresh: refresh);
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<Media>(
+  Widget build(BuildContext context) => FutureBuilder<TitleKnowledge>(
     future: _request,
-    initialData: widget.summary,
     builder: (context, snapshot) {
-      final item = snapshot.data ?? _lastGood ?? widget.summary;
+      final knowledge = snapshot.data ?? _lastGood;
+      final item = knowledge?.media ?? widget.summary;
       return Material(
         color: canvas,
         child: CinePage(
@@ -88,29 +90,13 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
                       setState(() => _request = _fetch(refresh: true)),
                 ),
               ),
-            if (item != null) ...[
-              CineSliver(bottom: 29, child: _DetailOverview(media: item)),
-              SliverPadding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: CineLayout.gutterOf(context),
-                ),
-                sliver: SliverList.builder(
-                  itemCount: 2,
-                  itemBuilder: (_, index) => Padding(
-                    padding: const EdgeInsets.only(bottom: 23),
-                    child: _RelatedShelf(
-                      ref: widget.ref,
-                      recommended: index != 0,
-                      title: index != 0
-                          ? 'Recommended'
-                          : item.isMovie
-                          ? 'Similar movies'
-                          : 'Similar TV shows',
-                    ),
-                  ),
-                ),
+            if (item != null)
+              CineSliver(
+                bottom: 20,
+                child: _DetailOverview(media: item, raw: knowledge?.data),
               ),
-            ],
+            if (knowledge != null)
+              CineSliver(child: TitleGraph(knowledge: knowledge)),
           ],
         ),
       );
@@ -274,8 +260,9 @@ class _DetailBillboard extends StatelessWidget {
 }
 
 class _DetailOverview extends StatelessWidget {
-  const _DetailOverview({required this.media});
+  const _DetailOverview({required this.media, this.raw});
   final Media media;
+  final Json? raw;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -374,6 +361,47 @@ class _DetailOverview extends StatelessWidget {
                       'TMDB score: ${media.rating.toStringAsFixed(1)} / 10',
                       style: const TextStyle(color: gold),
                     ),
+                  if (raw case final data?)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: FactList([
+                        ('Original title', _originalTitle(data)),
+                        (
+                          media.isMovie ? 'Release date' : 'First air date',
+                          text(
+                            data[media.isMovie
+                                ? 'release_date'
+                                : 'first_air_date'],
+                          ),
+                        ),
+                        ('Last aired', text(data['last_air_date'])),
+                        (
+                          'Production status',
+                          data['in_production'] == true
+                              ? 'In production'
+                              : null,
+                        ),
+                        ('Format', text(data['type'])),
+                        (
+                          'Countries',
+                          joined(names(data['production_countries'], 'name')) ??
+                              joined(strings(data['origin_country'])),
+                        ),
+                        ('Original language', text(data['original_language'])),
+                        (
+                          'Spoken languages',
+                          joined(
+                            names(data['spoken_languages'], 'english_name'),
+                          ),
+                        ),
+                        ('Budget', _usd(data['budget'])),
+                        ('Worldwide revenue', _usd(data['revenue'])),
+                        (
+                          'Votes',
+                          media.voteCount > 0 ? '${media.voteCount}' : null,
+                        ),
+                      ]),
+                    ),
                 ],
               ),
             ),
@@ -382,6 +410,24 @@ class _DetailOverview extends StatelessWidget {
       );
     },
   );
+
+  String? _originalTitle(Json data) {
+    final original = text(
+      data[media.isMovie ? 'original_title' : 'original_name'],
+    );
+    return original == media.title ? null : original;
+  }
+
+  String? _usd(Object? value) {
+    if (value is! int || value <= 0) return null;
+    final digits = value.toString();
+    final formatted = StringBuffer('USD ');
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) formatted.write(',');
+      formatted.write(digits[i]);
+    }
+    return formatted.toString();
+  }
 }
 
 class DetailSection extends StatelessWidget {
@@ -399,61 +445,5 @@ class DetailSection extends StatelessWidget {
         child,
       ],
     ),
-  );
-}
-
-class _RelatedShelf extends StatefulWidget {
-  const _RelatedShelf({
-    required this.ref,
-    required this.recommended,
-    required this.title,
-  });
-  final EntityRef ref;
-  final bool recommended;
-  final String title;
-
-  @override
-  State<_RelatedShelf> createState() => _RelatedShelfState();
-}
-
-class _RelatedShelfState extends State<_RelatedShelf> {
-  late final _catalogue = context.read<CatalogueRepository>();
-  late Future<List<Media>> _request;
-
-  @override
-  void initState() {
-    super.initState();
-    _request = _fetch();
-  }
-
-  Future<List<Media>> _fetch({bool refresh = false}) => _catalogue.related(
-    widget.ref,
-    recommended: widget.recommended,
-    refresh: refresh,
-  );
-
-  @override
-  Widget build(BuildContext context) => FutureBuilder<List<Media>>(
-    future: _request,
-    builder: (context, snapshot) {
-      final items = snapshot.data?.take(12).toList() ?? const <Media>[];
-      if (snapshot.connectionState == ConnectionState.done &&
-          !snapshot.hasError &&
-          items.isEmpty) {
-        return const SizedBox.shrink();
-      }
-      return PosterShelf(
-        title: widget.title,
-        shelfId: '${widget.ref}-${widget.recommended}',
-        items: items,
-        loading: snapshot.connectionState != ConnectionState.done,
-        notice: snapshot.hasError
-            ? MessageState(
-                message: catalogueError(snapshot.error),
-                onRetry: () => setState(() => _request = _fetch(refresh: true)),
-              )
-            : null,
-      );
-    },
   );
 }

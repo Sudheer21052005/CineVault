@@ -12,6 +12,11 @@ import '../core/performance.dart';
 import '../models/media.dart';
 import '../providers/watchlist_provider.dart';
 import '../ui/about.dart';
+import '../ui/entities.dart';
+import '../ui/episodes.dart';
+import '../ui/graph_widgets.dart' show entityLabel;
+import 'browser_back_stub.dart'
+    if (dart.library.js_interop) 'browser_back_web.dart';
 import 'navigation_scope.dart';
 import 'route_contract.dart';
 import 'scroll_watch.dart';
@@ -35,13 +40,18 @@ class CineVaultApp extends StatefulWidget {
 }
 
 class _CineVaultAppState extends State<CineVaultApp> {
-  late final _delegate = _CineRouter(widget.performance, widget.startupWatch);
-  late final _provider = PlatformRouteInformationProvider(
-    initialRouteInformation: RouteInformation(
-      uri: Uri.parse(
+  late final _initialUri =
+      Uri.tryParse(
         WidgetsBinding.instance.platformDispatcher.defaultRouteName,
-      ),
-    ),
+      ) ??
+      Uri(path: '/');
+  late final _delegate = _CineRouter(
+    widget.performance,
+    widget.startupWatch,
+    parseCineRoute(_initialUri),
+  );
+  late final _provider = PlatformRouteInformationProvider(
+    initialRouteInformation: RouteInformation(uri: _initialUri),
   );
 
   @override
@@ -142,34 +152,51 @@ class _CineParser extends RouteInformationParser<_Location> {
 }
 
 class _Entry {
-  const _Entry(this.id, this.route, {this.summary, this.heroTag, this.label});
+  _Entry(
+    this.id,
+    this.route, {
+    this.summary,
+    this.heroTag,
+    this.label,
+    this.direct = false,
+    PageStorageBucket? bucket,
+  }) : bucket = bucket ?? PageStorageBucket();
 
   final int id;
   final CineRoute route;
   final Media? summary;
   final String? heroTag;
   final String? label;
+  final bool direct;
+  final PageStorageBucket bucket;
 }
 
 class _HistoryEntry {
-  const _HistoryEntry(this.id, this.stack);
+  const _HistoryEntry(this.id, this.stack, {this.parent});
 
   final int id;
   final List<_Entry> stack;
+  final int? parent;
 }
 
 class _CineRouter extends RouterDelegate<_Location>
     with ChangeNotifier, PopNavigatorRouterDelegateMixin<_Location> {
-  _CineRouter(this._performance, this._startupWatch);
+  _CineRouter(this._performance, this._startupWatch, CineRoute initial) {
+    _active = _HistoryEntry(++_serial, _stackFor(initial));
+    _history[_active.id] = _active;
+    if (initial is TabRoute && initial.tab == AppTab.search) {
+      _lastSearch = initial;
+    }
+  }
 
   static const _shellKey = ValueKey('cinevault-shell');
   final AppPerformance _performance;
   final Stopwatch _startupWatch;
   final _history = <int, _HistoryEntry>{};
   final _searchRequests = ValueNotifier<int>(0);
-  var _active = const _HistoryEntry(0, [_Entry(0, TabRoute(AppTab.home))]);
+  late _HistoryEntry _active;
   var _lastSearch = const TabRoute(AppTab.search);
-  int _serial = 0;
+  int _serial = DateTime.now().microsecondsSinceEpoch;
   int _navigationRevision = 0;
   bool _shellPainted = false;
   bool _exiting = false;
@@ -186,6 +213,10 @@ class _CineRouter extends RouterDelegate<_Location>
   Future<void> setNewRoutePath(_Location configuration) async {
     final watch = Stopwatch()..start();
     final route = configuration.route;
+    if (configuration.historyId == null &&
+        _active.stack.last.route.uri == route.uri) {
+      return;
+    }
     final saved = _history[configuration.historyId];
     if (saved != null && saved.stack.last.route.uri == route.uri) {
       _activate(saved, watch);
@@ -198,11 +229,11 @@ class _CineRouter extends RouterDelegate<_Location>
       ? [_Entry(++_serial, route)]
       : [
           _Entry(++_serial, const TabRoute(AppTab.home)),
-          _Entry(++_serial, route),
+          _Entry(++_serial, route, direct: true),
         ];
 
-  void _replaceStack(List<_Entry> stack, Stopwatch watch) =>
-      _activate(_HistoryEntry(++_serial, stack), watch);
+  void _replaceStack(List<_Entry> stack, Stopwatch watch, {int? parent}) =>
+      _activate(_HistoryEntry(++_serial, stack, parent: parent), watch);
 
   void _activate(_HistoryEntry entry, Stopwatch? watch) {
     _active = entry;
@@ -239,16 +270,23 @@ class _CineRouter extends RouterDelegate<_Location>
     if (_active.stack.last.route.uri == route.uri) return;
     final watch = Stopwatch()..start();
     Router.navigate(context, () {
-      _replaceStack([
-        ..._active.stack,
-        _Entry(
-          ++_serial,
-          route,
-          summary: summary,
-          heroTag: heroTag,
-          label: label,
-        ),
-      ], watch);
+      _replaceStack(
+        [
+          _active.stack.first,
+          ..._active.stack.skip(
+            (_active.stack.length - 78).clamp(1, _active.stack.length),
+          ),
+          _Entry(
+            ++_serial,
+            route,
+            summary: summary,
+            heroTag: heroTag,
+            label: label ?? summary?.title,
+          ),
+        ],
+        watch,
+        parent: _active.id,
+      );
     });
   }
 
@@ -277,17 +315,72 @@ class _CineRouter extends RouterDelegate<_Location>
   }
 
   void _back(BuildContext context) {
+    final stack = _active.stack;
+    final previous = _history[_active.parent]?.stack;
+    if (kIsWeb &&
+        stack.length > 1 &&
+        previous != null &&
+        previous.length == stack.length - 1 &&
+        previous.last.id == stack[stack.length - 2].id) {
+      goBrowserBack();
+      return;
+    }
     final watch = Stopwatch()..start();
     Router.neglect(context, () => _popStack(watch));
   }
 
   void _popStack(Stopwatch watch) {
     final stack = _active.stack;
+    final current = stack.last;
+    final parent = current.direct
+        ? switch (current.route) {
+            final FilmographyRoute page => TitleRoute((
+              kind: EntityKind.person,
+              id: page.personId,
+            )),
+            final SeasonRoute page => TitleRoute((
+              kind: EntityKind.tv,
+              id: page.ref.seriesId,
+            )),
+            final EpisodeRoute page => SeasonRoute((
+              seriesId: page.ref.seriesId,
+              seasonNumber: page.ref.seasonNumber,
+            )),
+            _ => null,
+          }
+        : null;
     // Preserve the browser-visible history token when replacing a location.
-    final next = stack.length > 1
+    final next = parent != null
+        ? [stack.first, _Entry(++_serial, parent, direct: true)]
+        : stack.length > 1
         ? stack.sublist(0, stack.length - 1)
         : _stackFor(const TabRoute(AppTab.home));
     _activate(_HistoryEntry(_active.id, next), watch);
+  }
+
+  void _replace(BuildContext context, CineRoute route) {
+    final active = _active;
+    final previous = active.stack.last;
+    if (previous.route.uri == route.uri ||
+        previous.route.uri.path != route.uri.path) {
+      return;
+    }
+    Router.neglect(
+      context,
+      () => _activate(
+        _HistoryEntry(active.id, [
+          ...active.stack.take(active.stack.length - 1),
+          _Entry(
+            previous.id,
+            route,
+            label: previous.label,
+            direct: previous.direct,
+            bucket: previous.bucket,
+          ),
+        ], parent: active.parent),
+        null,
+      ),
+    );
   }
 
   @override
@@ -345,15 +438,31 @@ class _CineRouter extends RouterDelegate<_Location>
       });
     }
     final root = _active.stack.first.route as TabRoute;
+    final current = _active.stack.last;
     return CineNavigation(
       open: _open,
       select: _select,
       updateSearch: _updateSearch,
+      replace: _replace,
       back: _back,
       searchRequests: _searchRequests,
       child: ResponsiveShell(
         tab: root.tab,
         covered: _active.stack.length > 1,
+        routeLabel:
+            current.label ??
+            switch (current.route) {
+              final TitleRoute route => entityLabel(route.ref.kind),
+              FilmographyRoute() => 'Filmography',
+              final SeasonRoute route =>
+                route.ref.seasonNumber == 0
+                    ? 'Specials'
+                    : 'Season ${route.ref.seasonNumber}',
+              final EpisodeRoute route => 'Episode ${route.ref.episodeNumber}',
+              GenreRoute() => 'Genre',
+              final FeedRoute route => route.feed.label,
+              _ => null,
+            },
         onAbout: () {
           final view = navigatorKey.currentState;
           if (view != null) showCineAbout(view.context);
@@ -372,12 +481,16 @@ class _CineRouter extends RouterDelegate<_Location>
                 ),
               ),
             ),
-            for (final entry in _active.stack.skip(1))
+            for (final (index, entry) in _active.stack.indexed.skip(1))
               MaterialPage<void>(
                 key: ValueKey(entry.id),
-                child: ScrollWatch(
-                  area: entry.route.area,
-                  child: _buildPage(context, entry),
+                maintainState: index >= _active.stack.length - 5,
+                child: PageStorage(
+                  bucket: entry.bucket,
+                  child: ScrollWatch(
+                    area: entry.route.area,
+                    child: _buildPage(context, entry),
+                  ),
                 ),
               ),
           ],
@@ -406,23 +519,13 @@ class _CineRouter extends RouterDelegate<_Location>
           title: entry.label ?? route.feed.label,
           loader: context.read<CatalogueRepository>().feedLoader(route.feed),
         ),
-        final GenreRoute route => DiscoveryPage(
-          title:
-              entry.label ??
-              (route.ref.kind == MediaKind.movie ? 'Movie genre' : 'TV genre'),
-          loader: (page, {required refresh}) =>
-              context.read<CatalogueRepository>().discover(
-                (
-                  kind: route.ref.kind,
-                  genre: route.ref.id,
-                  year: null,
-                  minimumRating: null,
-                  sort: CatalogueSort.popularity,
-                ),
-                page: page,
-                refresh: refresh,
-              ),
-        ),
+        final TitleRoute route when route.ref.kind == EntityKind.person =>
+          PersonPage(ref: route.ref),
+        final TitleRoute route => CatalogueEntityPage(ref: route.ref),
+        final FilmographyRoute route => FilmographyPage(route: route),
+        final SeasonRoute route => SeasonPage(ref: route.ref),
+        final EpisodeRoute route => EpisodePage(ref: route.ref),
+        final GenreRoute route => GenrePage(ref: route.ref),
         _ => Scaffold(
           appBar: AppBar(
             title: const Text('Explore'),

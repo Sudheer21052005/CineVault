@@ -4,11 +4,13 @@ import '../app/navigation_scope.dart';
 import '../app/route_contract.dart';
 import '../catalogue/catalogue_repository.dart';
 import '../catalogue/entity_ref.dart';
+import '../catalogue/knowledge_models.dart';
 import '../catalogue/paged_controller.dart';
 import '../core/material.dart';
 import '../core/performance.dart';
 import 'catalogue_widgets.dart';
 import 'design_system.dart';
+import 'graph_widgets.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({required this.location, super.key});
@@ -21,7 +23,7 @@ class _SearchPageState extends State<SearchPage> {
   final _text = TextEditingController();
   final _focus = FocusNode(debugLabel: 'title search');
   final _scroll = ScrollController();
-  late final _pages = PagedController(
+  late final _pages = PagedController<SearchHit>(
     onFirstPage: (success) {
       _outcome = success ? PerfOutcome.success : PerfOutcome.failure;
     },
@@ -89,13 +91,22 @@ class _SearchPageState extends State<SearchPage> {
       ),
     );
     if (filters != null) {
-      _pages.setQuery(
-        (page, {required refresh}) =>
-            repository.discover(filters, page: page, refresh: refresh),
-      );
+      _pages.setQuery((page, {required refresh}) async {
+        final result = await repository.discover(
+          filters,
+          page: page,
+          refresh: refresh,
+        );
+        return CataloguePage(
+          items: result.items.map(SearchHit.title).toList(),
+          page: result.page,
+          totalPages: result.totalPages,
+          totalResults: result.totalResults,
+        );
+      });
     } else {
       _pages.setQuery(
-        (page, {required refresh}) => repository.search(
+        (page, {required refresh}) => repository.universalSearch(
           term,
           location.scope,
           page: page,
@@ -187,12 +198,36 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     final filters = _location.discovery;
     final hint = switch (_location.scope) {
-      SearchScope.all => 'Search movies and TV shows',
+      SearchScope.all => 'Search movies and TV shows, and people',
       SearchScope.movie => 'Search movies',
       SearchScope.tv => 'Search TV shows',
+      SearchScope.person => 'Search people',
+      SearchScope.collection => 'Search collections',
+      SearchScope.company => 'Search production companies',
+      SearchScope.keyword => 'Search keywords',
     };
     return PagedBrowseView(
       pages: _pages,
+      results: (hits) => CatalogueGrid(
+        count: hits.length,
+        itemBuilder: (_, index) {
+          final hit = hits[index];
+          final title = hit.media;
+          if (title != null) {
+            return PosterCard(media: title, heroTag: 'search-${title.key}');
+          }
+          final season = hit.season;
+          final episode = hit.episode;
+          return EntityResultCard(
+            link: hit.entity!,
+            route: episode != null
+                ? EpisodeRoute(episode)
+                : season != null
+                ? SeasonRoute(season)
+                : null,
+          );
+        },
+      ),
       scroll: _scroll,
       onFirstPaint: _markFirstPaint,
       heroPrefix: 'search',
@@ -201,7 +236,10 @@ class _SearchPageState extends State<SearchPage> {
         message: 'Search the TMDB catalogue to find your next story.',
       ),
       emptyMessage: filters == null
-          ? 'No matching titles found.'
+          ? (_location.scope == SearchScope.movie ||
+                    _location.scope == SearchScope.tv
+                ? 'No matching titles found.'
+                : 'No matching results found.')
           : 'No titles match these discovery filters.',
       header: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,9 +278,13 @@ class _SearchPageState extends State<SearchPage> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               for (final (scope, label) in const [
-                (SearchScope.all, 'All titles'),
+                (SearchScope.all, 'Titles & people'),
                 (SearchScope.movie, 'Movies'),
                 (SearchScope.tv, 'TV Shows'),
+                (SearchScope.person, 'People'),
+                (SearchScope.collection, 'Collections'),
+                (SearchScope.company, 'Companies'),
+                (SearchScope.keyword, 'Keywords'),
               ])
                 ChoiceChip(
                   label: Text(label),
@@ -266,6 +308,24 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ],
           ),
+          if (externalReference(_location.text) case (
+            source: final source,
+            value: _,
+          ))
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                'External ID lookup · ${source.split('_').first.toUpperCase()}',
+                style: cineLabel(color: blue),
+              ),
+            )
+          else if (_location.text.isEmpty && filters == null)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: GraphMessage(
+                'Search by name or paste an IMDb ID such as tt1375666.',
+              ),
+            ),
           if (filters != null)
             Padding(
               padding: const EdgeInsets.only(top: 13),

@@ -2,8 +2,24 @@ import '../core/network/tmdb_transport.dart';
 import '../core/performance.dart';
 import '../models/media.dart';
 import 'entity_ref.dart';
+import 'knowledge_models.dart';
 
-enum SearchScope { all, movie, tv }
+enum SearchScope { all, movie, tv, person, collection, company, keyword }
+
+enum KnowledgeSection {
+  credits('credits'),
+  videos('videos'),
+  images('images'),
+  reviews('reviews'),
+  providers('watch/providers'),
+  releases('release_dates'),
+  ratings('content_ratings'),
+  translations('translations'),
+  alternateTitles('alternative_titles');
+
+  const KnowledgeSection(this.path);
+  final String path;
+}
 
 enum CatalogueSort {
   popularity('Popularity', 'popularity.desc'),
@@ -85,20 +101,21 @@ enum CatalogueFeed {
 }
 
 typedef Genre = ({int id, String name});
-typedef PageLoader = Future<TmdbPage> Function(
-  int page, {
-  required bool refresh,
-});
+typedef PageLoader = CatalogueLoader<Media>;
+typedef CatalogueLoader<T extends CatalogueItem> =
+    Future<CataloguePage<T>> Function(int page, {required bool refresh});
 
-class TmdbPage {
-  const TmdbPage({
+typedef TmdbPage = CataloguePage<Media>;
+
+class CataloguePage<T extends CatalogueItem> {
+  const CataloguePage({
     required this.items,
     required this.page,
     required this.totalPages,
     required this.totalResults,
   });
 
-  final List<Media> items;
+  final List<T> items;
   final int page;
   final int totalPages;
   final int totalResults;
@@ -191,6 +208,111 @@ class CatalogueRepository {
     refresh: refresh,
   );
 
+  Future<CataloguePage<SearchHit>> universalSearch(
+    String term,
+    SearchScope scope, {
+    int page = 1,
+    bool refresh = false,
+  }) async {
+    final lookup = externalReference(term);
+    if (lookup != null) {
+      final result = await transport.get(
+        '/find/${lookup.value}',
+        operation: PerfArea.textSearch,
+        query: {'external_source': lookup.source},
+        ttl: const Duration(minutes: 5),
+        refresh: refresh,
+      );
+      final hits = <SearchHit>[
+        for (final kind in [EntityKind.movie, EntityKind.tv, EntityKind.person])
+          if (scope == SearchScope.all || scope.name == kind.name)
+            for (final entry in objects(result['${kind.name}_results']))
+              ?_searchHit(entry, kind.name),
+        if (scope == SearchScope.all || scope == SearchScope.tv) ...[
+          for (final entry in objects(result['tv_season_results']))
+            ?_findTv(entry, episode: false),
+          for (final entry in objects(result['tv_episode_results']))
+            ?_findTv(entry, episode: true),
+        ],
+      ];
+      return CataloguePage(
+        items: hits,
+        page: 1,
+        totalPages: 1,
+        totalResults: hits.length,
+      );
+    }
+    final result = await transport.get(
+      '/search/${scope == SearchScope.all ? 'multi' : scope.name}',
+      operation: PerfArea.textSearch,
+      query: {
+        'query': term.trim(),
+        'page': '$page',
+        if (scope != SearchScope.company && scope != SearchScope.keyword)
+          'include_adult': 'false',
+      },
+      ttl: const Duration(minutes: 5),
+      refresh: refresh,
+    );
+    final hits = [
+      for (final entry in _array(result['results']))
+        ?_searchHit(
+          entry,
+          scope == SearchScope.all ? text(entry['media_type']) : scope.name,
+        ),
+    ];
+    return CataloguePage(
+      items: hits,
+      page: integer(result['page']) ?? page,
+      totalPages: integer(result['total_pages']) ?? page,
+      totalResults: integer(result['total_results']) ?? hits.length,
+    );
+  }
+
+  SearchHit? _searchHit(Json entry, String? type) {
+    if (entry['adult'] == true) return null;
+    final kind = EntityKind.values
+        .where((value) => value.name == type)
+        .firstOrNull;
+    if (kind == null) return null;
+    if (kind == EntityKind.movie || kind == EntityKind.tv) {
+      final media = Media.fromJson(entry, forcedType: kind.name);
+      return media.id > 0 ? SearchHit.title(media) : null;
+    }
+    final link = EntityLink.read(entry, kind);
+    return link == null ? null : SearchHit.entity(link);
+  }
+
+  SearchHit? _findTv(Json entry, {required bool episode}) {
+    final show = integer(entry['show_id']);
+    final season = integer(entry['season_number']);
+    final number = integer(entry['episode_number']);
+    final name = text(entry['name']);
+    if (show == null ||
+        show <= 0 ||
+        season == null ||
+        season < 0 ||
+        name == null) {
+      return null;
+    }
+    final link = EntityLink(
+      (kind: EntityKind.tv, id: show),
+      name,
+      caption: episode ? 'Season $season · Episode $number' : 'Season $season',
+      image: text(entry[episode ? 'still_path' : 'poster_path']),
+    );
+    if (!episode) {
+      return SearchHit.season(link, (seriesId: show, seasonNumber: season));
+    }
+    return number == null || number <= 0
+        ? null
+        : SearchHit.episode(link, (
+            seriesId: show,
+            seasonNumber: season,
+            episodeNumber: number,
+          ));
+  }
+
   Future<TmdbPage> discover(
     DiscoveryQuery filters, {
     int page = 1,
@@ -234,12 +356,19 @@ class CatalogueRepository {
     ];
   }
 
-  Future<Media> details(EntityRef ref, {bool refresh = false}) async {
+  Future<Media> details(EntityRef ref, {bool refresh = false}) async =>
+      (await titleKnowledge(ref, refresh: refresh)).media;
+
+  Future<TitleKnowledge> titleKnowledge(
+    EntityRef ref, {
+    bool refresh = false,
+  }) async {
     final kind = MediaKind.parse(ref.kind.name);
     if (kind == null) throw const TmdbException(TmdbErrorKind.rejected);
     final data = await transport.get(
       '/${kind.name}/${ref.id}',
       operation: PerfArea.titleDetails,
+      query: const {'append_to_response': 'external_ids,keywords'},
       ttl: _detailTtl,
       refresh: refresh,
     );
@@ -247,7 +376,103 @@ class CatalogueRepository {
     if (media.ref != ref) {
       throw const TmdbException(TmdbErrorKind.invalidResponse);
     }
-    return media;
+    return TitleKnowledge(media, data);
+  }
+
+  Future<Json> entity(EntityRef ref, {bool refresh = false}) => _knowledge(
+    '/${ref.kind.name}/${ref.id}',
+    query: ref.kind == EntityKind.person
+        ? const {'append_to_response': 'external_ids'}
+        : const {},
+    refresh: refresh,
+  );
+
+  Future<Json> filmography(int personId, {bool refresh = false}) =>
+      _knowledge('/person/$personId/combined_credits', refresh: refresh);
+
+  Future<Json> season(SeasonRef ref, {bool refresh = false}) => _knowledge(
+    '/tv/${ref.seriesId}/season/${ref.seasonNumber}',
+    query: const {'append_to_response': 'external_ids'},
+    refresh: refresh,
+  );
+
+  Future<Json> episode(EpisodeRef ref, {bool refresh = false}) => _knowledge(
+    '/tv/${ref.seriesId}/season/${ref.seasonNumber}/episode/${ref.episodeNumber}',
+    query: const {'append_to_response': 'external_ids'},
+    refresh: refresh,
+  );
+
+  Future<Json> seasonCredits(SeasonRef ref, {bool refresh = false}) =>
+      _knowledge(
+        '/tv/${ref.seriesId}/season/${ref.seasonNumber}/aggregate_credits',
+        refresh: refresh,
+      );
+
+  Future<Json> section(
+    EntityRef ref,
+    KnowledgeSection section, {
+    int page = 1,
+    bool refresh = false,
+  }) => _knowledge(
+    '/${ref.kind.name}/${ref.id}/${section == KnowledgeSection.credits && ref.kind == EntityKind.tv ? 'aggregate_credits' : section.path}',
+    ttl: section == KnowledgeSection.providers
+        ? const Duration(hours: 6)
+        : _detailTtl,
+    query: {
+      if (section == KnowledgeSection.reviews) 'page': '$page',
+      if (section == KnowledgeSection.images)
+        'include_image_language': 'en,null',
+    },
+    refresh: refresh,
+  );
+
+  Future<Json> episodeImages(
+    EpisodeRef ref, {
+    bool refresh = false,
+  }) => _knowledge(
+    '/tv/${ref.seriesId}/season/${ref.seasonNumber}/episode/${ref.episodeNumber}/images',
+    refresh: refresh,
+  );
+
+  Future<Json> watchRegions({bool refresh = false}) => _knowledge(
+    '/watch/providers/regions',
+    ttl: const Duration(days: 7),
+    refresh: refresh,
+  );
+
+  Future<Json> _knowledge(
+    String path, {
+    Map<String, String> query = const {},
+    Duration ttl = _detailTtl,
+    required bool refresh,
+  }) => transport.get(
+    path,
+    operation: PerfArea.entity,
+    query: query,
+    ttl: ttl,
+    refresh: refresh,
+  );
+
+  PageLoader associated(MediaKind kind, {EntityRef? entity, GenreRef? genre}) {
+    final filter = switch (entity?.kind) {
+      EntityKind.company => 'with_companies',
+      EntityKind.network => 'with_networks',
+      EntityKind.keyword => 'with_keywords',
+      _ => 'with_genres',
+    };
+    final id = entity?.id ?? genre!.id;
+    return (page, {required refresh}) => _page(
+      '/discover/${kind.name}',
+      PerfArea.entity,
+      page,
+      kind: kind,
+      query: {
+        filter: '$id',
+        'include_adult': 'false',
+        'sort_by': 'popularity.desc',
+      },
+      refresh: refresh,
+    );
   }
 
   Future<List<Media>> related(

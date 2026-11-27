@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../models/media.dart';
 import 'catalogue_repository.dart';
+import 'entity_ref.dart';
 
 enum PageStatus { idle, loading, ready, refreshing, failed }
 
-typedef PageState = ({
-  List<Media> items,
+typedef PageState<T extends CatalogueItem> = ({
+  List<T> items,
   PageStatus status,
   Object? error,
   bool loadingNext,
@@ -16,23 +16,23 @@ typedef PageState = ({
   bool hasMore,
 });
 
-class PagedController extends ChangeNotifier {
+class PagedController<T extends CatalogueItem> extends ChangeNotifier {
   PagedController({this.onFirstPage});
 
   final void Function(bool success)? onFirstPage;
-  final _items = <String, Media>{};
-  List<Media> _snapshot = const [];
+  final _items = <String, T>{};
+  List<T> _snapshot = const [];
   PageStatus _status = PageStatus.idle;
   Object? _error;
   Object? _nextError;
   bool _loadingNext = false;
   bool _disposed = false;
-  TmdbPage? _page;
+  CataloguePage<T>? _page;
   Timer? _debounce;
   int _generation = 0;
-  PageLoader? _load;
+  CatalogueLoader<T>? _load;
 
-  PageState get state => (
+  PageState<T> get state => (
     items: _snapshot,
     status: _status,
     error: _error,
@@ -41,7 +41,7 @@ class PagedController extends ChangeNotifier {
     hasMore: _page?.hasMore ?? false,
   );
 
-  void setQuery(PageLoader? load, {Duration debounce = Duration.zero}) {
+  void setQuery(CatalogueLoader<T>? load, {Duration debounce = Duration.zero}) {
     _debounce?.cancel();
     _generation++;
     _load = load;
@@ -114,7 +114,7 @@ class PagedController extends ChangeNotifier {
     }
   }
 
-  void _append(TmdbPage page) {
+  void _append(CataloguePage<T> page) {
     _page = page;
     for (final item in page.items) {
       _items.putIfAbsent(item.key, () => item);
