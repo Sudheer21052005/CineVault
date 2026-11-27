@@ -27,6 +27,21 @@ def fixture_visible(browser):
     return browser.now() if pixels >= 120 else None
 
 
+def focus_search(browser):
+    def focus():
+        if browser.evaluate("""(() => {
+          let element = document.activeElement;
+          while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+          return element?.tagName === 'INPUT' || element?.tagName === 'TEXTAREA';
+        })()"""):
+            return True
+        field = browser.pick("Search movies and TV shows")
+        if field:
+            browser.click(field)
+        return False
+    browser.wait(focus, "focused search editor")
+
+
 def interactive(browser):
     browser.device(1440, 900)
     browser.call("Network.setCacheDisabled", cacheDisabled=True)
@@ -39,7 +54,7 @@ def interactive(browser):
     images = browser.artwork_network[art_start:]
     initial_api = len(browser.calls) - calls
     document(browser, "/search")
-    browser.tap("Search movies and TV shows")
+    focus_search(browser)
     start = browser.now()
     browser.call("Input.insertText", text="Inception")
     hit = browser.point("Inception 2010", role="button")
@@ -114,6 +129,8 @@ def sustained_scroll(browser, seconds):
     browser.evaluate("location.hash = '#/'")
     browser.point("Trending this week")
     post = used_heap(browser)
+    browser.call("HeapProfiler.collectGarbage")
+    retained = used_heap(browser)
     ordered = sorted(deltas)
     return {
         "scroll_frame_samples": len(deltas),
@@ -121,8 +138,10 @@ def sustained_scroll(browser, seconds):
         "scroll_raf_p95_ms": ordered[math.ceil(len(ordered) * .95) - 1],
         "scroll_raf_over_16_7ms_pct": 100 * sum(frame > 16.7 for frame in deltas) / len(deltas),
         "scroll_raf_over_20ms_pct": 100 * sum(frame > 20 for frame in deltas) / len(deltas),
+        "before_scroll_js_heap_mib": heaps[0],
         "scroll_peak_js_heap_mib": max(heaps),
         "after_return_js_heap_mib": post,
+        "after_return_gc_js_heap_mib": retained,
         "scroll_completed_artwork_requests": len(images),
         "scroll_catalogue_pages_requested": pages,
         "scroll_artwork_mib": sum(item[2] for item in images) / (1024 ** 2),
@@ -177,14 +196,17 @@ def main():
     for label, path in [("phase1", args.baseline), ("phase2", args.current)]:
         if path is None:
             continue
-        with serve(path, True) as origin, chrome(args.chrome, origin, True, artwork=True) as browser:
-            if args.samples:
+        if args.samples:
+            with serve(path, True) as origin, chrome(args.chrome, origin, True, artwork=True) as browser:
                 measurements = [interactive(browser) for _ in range(args.samples)]
                 print(json.dumps({label + "_interactive": summarize(measurements)}, indent=2), flush=True)
         if args.scroll_samples:
-            with serve(path, True) as origin, chrome(args.chrome, origin, True, artwork=True) as browser:
-                samples = [sustained_scroll(browser, args.scroll_seconds) for _ in range(args.scroll_samples)]
-                print(json.dumps({label + "_scroll": summarize(samples)}, indent=2), flush=True)
+            samples = []
+            with serve(path, True) as origin:
+                for _ in range(args.scroll_samples):
+                    with chrome(args.chrome, origin, True, artwork=True) as browser:
+                        samples.append(sustained_scroll(browser, args.scroll_seconds))
+            print(json.dumps({label + "_scroll": summarize(samples)}, indent=2), flush=True)
 
 
 if __name__ == "__main__":

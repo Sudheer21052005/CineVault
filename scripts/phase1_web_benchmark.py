@@ -348,11 +348,18 @@ def chrome(executable, origin, fixture_mode, artwork=False):
         try:
             port_file = Path(profile) / "DevToolsActivePort"
             deadline = time.monotonic() + 12
-            while not port_file.is_file():
+            while True:
+                try:
+                    lines = port_file.read_text(encoding="utf-8").splitlines()
+                    if lines and lines[0].isdigit():
+                        port = lines[0]
+                        break
+                except (FileNotFoundError, PermissionError):
+                    # On Windows the file can exist while Chrome is still writing it.
+                    pass
                 if browser.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError("Isolated Chrome failed to start")
                 time.sleep(0.05)
-            port = port_file.read_text(encoding="utf-8").splitlines()[0]
             with urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as response:
                 targets = json.load(response)
             url = next(target["webSocketDebuggerUrl"] for target in targets if target["type"] == "page")
