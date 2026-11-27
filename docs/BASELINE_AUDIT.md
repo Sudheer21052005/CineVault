@@ -2,6 +2,8 @@
 
 27 November 2026 · `feature/ui-redesign` · baseline `7d9440c3a3bcd749eea890d616ebb00f2d17622a`
 
+This document records pre-implementation behavior. See [Phase 1 results](PHASE1_RESULTS.md) for fixes, verification and the controlled release-web comparison.
+
 The existing Flutter Web app loads live TMDB data and supports local watchlist tracking. The highest-priority defects are a Now Playing back action that can leave a blank app, search filters that are ignored with typed queries, and a persistence initialization sequence that seeds an intentionally empty box and initially misses eligible achievements. Start with regression coverage, navigation and search correctness, and measurable data and storage boundaries. The [upgrade plan](UPGRADE_PLAN.md) defines the implementation sequence.
 
 ## Scope and repository verification
