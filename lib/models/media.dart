@@ -1,5 +1,7 @@
 import '../catalogue/entity_ref.dart';
 
+typedef MediaGenre = ({int id, String name});
+
 class Media {
   const Media({
     required this.id,
@@ -16,6 +18,9 @@ class Media {
     this.episodeRuntime,
     this.genres = const [],
     this.genreIds = const [],
+    this.linkedGenres = const [],
+    this.tagline,
+    this.releaseStatus,
     this.popularity = 0,
   });
 
@@ -33,6 +38,9 @@ class Media {
   final int? episodeRuntime;
   final List<String> genres;
   final List<int> genreIds;
+  final List<MediaGenre> linkedGenres;
+  final String? tagline;
+  final String? releaseStatus;
   final double popularity;
 
   bool get isMovie => type == 'movie';
@@ -72,6 +80,13 @@ class Media {
           .firstOrNull
           ?.toInt(),
       genres: List.unmodifiable(genreNames),
+      linkedGenres: List.unmodifiable([
+        for (final item in detailedGenres)
+          if (item['id'] case final int id when id > 0)
+            if (item['name'] case final String name) (id: id, name: name),
+      ]),
+      tagline: _string(json['tagline']),
+      releaseStatus: _string(json['status']),
       genreIds: List.unmodifiable({
         ..._list(json['genre_ids']).whereType<int>(),
         ...detailedGenres.map((item) => item['id']).whereType<int>(),

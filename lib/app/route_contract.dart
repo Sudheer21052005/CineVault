@@ -4,6 +4,8 @@ import '../core/performance.dart';
 
 enum AppTab {
   home('/', PerfArea.home),
+  discover('/discover', PerfArea.discoverHub),
+  movies('/discover/movies', PerfArea.movies),
   nowPlaying('/discover/now-playing', PerfArea.nowPlaying),
   tv('/discover/tv', PerfArea.tv),
   search('/search', PerfArea.search),

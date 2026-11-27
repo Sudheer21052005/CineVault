@@ -19,7 +19,9 @@ enum PerfEvent {
   scrollFrames,
   tmdbRequest,
   tmdbCacheHit,
+  tmdbDiskHit,
   tmdbJoined,
+  artworkReady,
 }
 
 enum PerfArea {
@@ -43,6 +45,10 @@ enum PerfArea {
   recommendations,
   genres,
   releaseFeed,
+  discoverHub,
+  movies,
+  poster,
+  backdrop,
 }
 
 enum PerfOutcome { success, failure, cancelled }

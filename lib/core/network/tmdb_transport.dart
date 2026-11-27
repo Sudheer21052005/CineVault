@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 import '../performance.dart';
+import 'catalogue_cache.dart';
 
 enum TmdbErrorKind {
   configuration,
@@ -47,6 +48,7 @@ class TmdbTransport {
     required this._credential,
     required this._performance,
     http.Client? client,
+    CatalogueCache? durableCache,
     DateTime Function()? now,
     Future<void> Function(Duration)? sleep,
     double Function()? random,
@@ -57,6 +59,7 @@ class TmdbTransport {
     this.requestBudget = const Duration(seconds: 8),
   }) : assert(maxConcurrent > 0 && maxEntries > 0 && maxBytes > 0),
        _client = client ?? http.Client(),
+       _durable = durableCache,
        _now = now ?? DateTime.now,
        _sleep = sleep ?? Future<void>.delayed,
        _random = random ?? Random().nextDouble;
@@ -64,6 +67,7 @@ class TmdbTransport {
   final Future<String> Function() _credential;
   final AppPerformance _performance;
   final http.Client _client;
+  final CatalogueCache? _durable;
   final DateTime Function() _now;
   final Future<void> Function(Duration) _sleep;
   final double Function() _random;
@@ -124,7 +128,7 @@ class TmdbTransport {
     _queue.add(() async {
       try {
         result.complete(
-          await _fetch(path, parameters, key, operation, ttl, watch),
+          await _resolve(path, parameters, key, operation, ttl, watch, refresh),
         );
       } catch (error, stack) {
         result.completeError(error, stack);
@@ -145,6 +149,48 @@ class TmdbTransport {
     }
   }
 
+  Future<Map<String, dynamic>> _resolve(
+    String path,
+    Map<String, String> parameters,
+    String key,
+    PerfArea operation,
+    Duration ttl,
+    Stopwatch watch,
+    bool refresh,
+  ) async {
+    // Keep entered search terms and ad-hoc facets out of durable storage.
+    final disk =
+        operation == PerfArea.textSearch || operation == PerfArea.discover
+        ? null
+        : _durable;
+    if (disk != null && !refresh) {
+      try {
+        final entry = await disk
+            .read(key, _now())
+            .timeout(const Duration(milliseconds: 100));
+        if (entry != null) {
+          final data = decodeStoredResponse(entry);
+          if (data != null) {
+            _put(key, _CacheEntry(data, entry.expires, entry.bytes));
+            _performance.record(
+              PerfSample(
+                PerfEvent.tmdbDiskHit,
+                watch.elapsed,
+                area: operation,
+                bytes: entry.bytes,
+                outcome: PerfOutcome.success,
+              ),
+            );
+            return data;
+          }
+        }
+      } catch (_) {
+        // Metadata cache failures fall through to the catalogue.
+      }
+    }
+    return _fetch(path, parameters, key, operation, ttl, watch, disk);
+  }
+
   Future<Map<String, dynamic>> _fetch(
     String path,
     Map<String, String> parameters,
@@ -152,6 +198,7 @@ class TmdbTransport {
     PerfArea operation,
     Duration ttl,
     Stopwatch watch,
+    CatalogueCache? disk,
   ) async {
     var attempts = 0;
     int? bytes;
@@ -195,10 +242,24 @@ class TmdbTransport {
           if (status >= 200 && status < 300) {
             bytes = response.bodyBytes.length;
             try {
-              final data = jsonDecode(utf8.decode(response.bodyBytes));
+              final body = utf8.decode(response.bodyBytes);
+              final data = jsonDecode(body);
               if (data is! Map<String, dynamic>) throw const FormatException();
               final frozen = Map<String, dynamic>.unmodifiable(data);
-              _put(key, _CacheEntry(frozen, _now().add(ttl), bytes));
+              final now = _now();
+              final expires = now.add(ttl);
+              _put(key, _CacheEntry(frozen, expires, bytes));
+              if (disk != null) {
+                unawaited(
+                  disk
+                      .write(key, (
+                        json: body,
+                        bytes: bytes,
+                        expires: expires,
+                      ), now)
+                      .catchError((Object _) {}),
+                );
+              }
               outcome = PerfOutcome.success;
               return frozen;
             } on FormatException {

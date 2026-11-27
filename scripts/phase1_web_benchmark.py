@@ -7,9 +7,10 @@ credential. Fixture runs override the credential asset with a dummy value.
 
 import argparse
 import base64
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import math
 from pathlib import Path
@@ -22,6 +23,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
+from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
 
@@ -34,6 +36,13 @@ class LocalBuild(SimpleHTTPRequestHandler):
         self.fixture_mode = fixture_mode
         super().__init__(*args, **kwargs)
 
+    def handle(self):
+        try:
+            super().handle()
+        except ConnectionError:
+            # Chrome can cancel an in-flight asset when starting a new document.
+            pass
+
     def do_GET(self):
         if self.fixture_mode and urlsplit(self.path).path == "/assets/.env":
             dummy = b"TMDB_API_KEY=fixture-only\n"
@@ -43,11 +52,7 @@ class LocalBuild(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(dummy)
             return
-        try:
-            super().do_GET()
-        except ConnectionError:
-            # Chrome can cancel an in-flight asset when starting a new document.
-            pass
+        super().do_GET()
 
     def log_message(self, _format, *_args):
         pass
@@ -67,21 +72,33 @@ def serve(path, fixture_mode):
 
 
 class Catalogue:
-    def __init__(self):
+    def __init__(self, artwork=False):
         data = json.loads(FIXTURE.read_text(encoding="utf-8"))
         self.movies = data["movies"]
         self.tv = data["tv"]
         self.genres = data["genres"]
+        self.artwork = artwork
+        if artwork:
+            for item in self.movies + self.tv:
+                item["poster_path"] = f"/poster-{item['id']}.jpg"
+                item["backdrop_path"] = f"/backdrop-{item['id']}.jpg"
         self.titles = self.movies + self.tv
         self.more_movies = self.movies + [
-            dict(self.movies[0], id=500000 + index, title=f"Fixture movie {index}")
-            for index in range(1, 37)
+            dict(self.movies[0], id=500000 + index, title=f"Fixture movie {index}",
+                 **({"poster_path": f"/poster-{index + 500000}.jpg"} if artwork else {}))
+            for index in range(1, 158 if artwork else 37)
         ]
 
     def response(self, url):
         path = url.path.removeprefix("/3/").split("/")
         kind = path[0]
         params = parse_qs(url.query)
+        if kind == "configuration":
+            return 200, {"images": {
+                "secure_base_url": "https://image.tmdb.org/t/p/",
+                "poster_sizes": ["w92", "w154", "w185", "w342", "w500", "w780", "original"],
+                "backdrop_sizes": ["w300", "w780", "w1280", "original"],
+            }}
         choices = self.tv if "tv" in path else self.movies
         if kind == "genre":
             return 200, {"genres": self.genres[path[1]]}
@@ -103,6 +120,12 @@ class Catalogue:
             return 404, {}
         elif path == ["movie", "now_playing"]:
             choices = self.more_movies
+            if self.artwork:
+                page = int(params.get("page", ["1"])[0])
+                return 200, {
+                    "page": page, "total_pages": 8, "total_results": len(choices),
+                    "results": choices[(page - 1) * 20:page * 20],
+                }
         return 200, {"page": 1, "total_pages": 1,
                      "total_results": len(choices), "results": choices}
 
@@ -139,26 +162,54 @@ DOM_HELPERS = r"""
 
 
 class Browser:
-    def __init__(self, websocket, origin, fixture_mode):
+    def __init__(self, websocket, origin, fixture_mode, artwork=False):
         self.socket = websocket
         self.origin = origin
         self.fixture_mode = fixture_mode
-        self.catalogue = Catalogue()
+        self.catalogue = Catalogue(artwork)
+        self.artwork = artwork
+        self.images = {}
         self.responses = {}
         self.pending = []
         self.serial = 0
         self.sample = 0
         self.calls = []
         self.network = []
+        self.artwork_network = []
         self.request_ids = {}
         self.call("Page.enable")
         self.call("Network.enable")
         self.call("Page.addScriptToEvaluateOnNewDocument", source=DOM_HELPERS)
         if fixture_mode:
-            self.call("Fetch.enable", patterns=[
+            patterns = [
                 {"urlPattern": "https://api.themoviedb.org/*"},
                 {"urlPattern": "https://*.gstatic.com/flutter-canvaskit/*"},
-            ])
+            ]
+            if self.artwork:
+                patterns.append({"urlPattern": "https://image.tmdb.org/*"})
+            self.call("Fetch.enable", patterns=patterns)
+
+    def image(self, path):
+        from PIL import Image, ImageDraw
+
+        parts = path.rsplit("/", 2)
+        width = int(parts[-2].removeprefix("w"))
+        landscape = parts[-1].startswith("backdrop")
+        group = int(parts[-1].split("-")[-1].split(".")[0]) % 9
+        key = (landscape, width, group)
+        if key not in self.images:
+            height = width * 9 // 16 if landscape else width * 3 // 2
+            image = Image.new("RGB", (width, height), (125 + group * 3, 43, 150))
+            draw = ImageDraw.Draw(image)
+            span = max(1, width // 42)
+            for x in range(0, width, span):
+                for y in range(0, height, span):
+                    shade = (x * 11 + y * 7 + group * 31) % 69
+                    draw.rectangle((x, y, x + span, y + span), fill=(143 + shade, 38 + shade // 2, 149 + shade))
+            payload = io.BytesIO()
+            image.save(payload, format="JPEG", quality=86)
+            self.images[key] = payload.getvalue()
+        return self.images[key]
 
     def send(self, method, **params):
         self.serial += 1
@@ -180,9 +231,9 @@ class Browser:
     def poll(self):
         now = time.monotonic()
         while self.pending and self.pending[0][0] <= now:
-            _, request, status, body = self.pending.pop(0)
+            _, request, status, body, media_type = self.pending.pop(0)
             self.send("Fetch.fulfillRequest", requestId=request, responseCode=status,
-                      responseHeaders=[{"name": "Content-Type", "value": "application/json"},
+                      responseHeaders=[{"name": "Content-Type", "value": media_type},
                                        {"name": "Access-Control-Allow-Origin", "value": "*"}],
                       body=base64.b64encode(body).decode("ascii"))
         try:
@@ -203,7 +254,12 @@ class Browser:
                 status, body = self.catalogue.response(url)
                 data = json.dumps(body, separators=(",", ":")).encode()
                 self.calls.append(url.path)
-                self.pending.append((time.monotonic() + DELAY_SECONDS, request, status, data))
+                self.pending.append((time.monotonic() + DELAY_SECONDS, request, status, data, "application/json"))
+                self.pending.sort(key=lambda item: item[0])
+            elif url.hostname == "image.tmdb.org":
+                data = self.image(url.path)
+                self.pending.append((time.monotonic() + .12, request, 200, data, "image/jpeg"))
+                self.pending.sort(key=lambda item: item[0])
             else:
                 # The older build used the CanvasKit CDN. Serve its identical
                 # bundled renderer from loopback to control both runs.
@@ -214,11 +270,17 @@ class Browser:
         elif event.get("method") == "Network.requestWillBeSent":
             url = urlsplit(params["request"]["url"])
             if url.hostname == "api.themoviedb.org":
-                self.request_ids[params["requestId"]] = (url.path, params["timestamp"])
+                self.request_ids[params["requestId"]] = (url.path, params["timestamp"], False)
+            if url.hostname == "image.tmdb.org" and self.artwork:
+                self.request_ids[params["requestId"]] = (url.path, params["timestamp"], True)
         elif event.get("method") == "Network.loadingFinished":
             req = self.request_ids.pop(params["requestId"], None)
             if req:
-                self.network.append((req[0], (params["timestamp"] - req[1]) * 1000))
+                if req[2]:
+                    self.artwork_network.append((req[0], (params["timestamp"] - req[1]) * 1000,
+                                                 len(self.image(req[0]))))
+                else:
+                    self.network.append((req[0], (params["timestamp"] - req[1]) * 1000))
 
     def evaluate(self, expression):
         result = self.call("Runtime.evaluate", expression=expression, returnByValue=True)
@@ -276,7 +338,7 @@ class Browser:
 
 
 @contextmanager
-def chrome(executable, origin, fixture_mode):
+def chrome(executable, origin, fixture_mode, artwork=False):
     with tempfile.TemporaryDirectory(prefix="cinevault-chrome-", ignore_cleanup_errors=True) as profile:
         browser = subprocess.Popen([
             executable, "--headless=new", "--disable-gpu", "--no-first-run",
@@ -295,10 +357,18 @@ def chrome(executable, origin, fixture_mode):
                 targets = json.load(response)
             url = next(target["webSocketDebuggerUrl"] for target in targets if target["type"] == "page")
             with connect(url, max_size=2 * 1024 * 1024) as socket:
-                yield Browser(socket, origin, fixture_mode)
+                runner = Browser(socket, origin, fixture_mode, artwork)
+                try:
+                    yield runner
+                finally:
+                    with suppress(ConnectionClosed, OSError):
+                        runner.send("Browser.close")
         finally:
-            browser.terminate()
-            browser.wait(timeout=8)
+            try:
+                browser.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                browser.kill()
+                browser.wait(timeout=20)
 
 
 def benchmark(browser):

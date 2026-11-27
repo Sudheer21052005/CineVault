@@ -8,6 +8,7 @@ import 'package:cinevault/core/performance.dart';
 import 'package:cinevault/library/library_repository.dart';
 import 'package:cinevault/providers/watchlist_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:http/testing.dart';
 
 import 'support/memory_library_store.dart';
@@ -62,12 +63,14 @@ void main() {
       );
       expect(harness.tmdb.paths, isNot(contains('/3/tv/popular')));
 
-      await tester.tap(find.text('Now Playing'));
+      await tester.tap(find.text('Now Playing').first);
       await tester.pumpAndSettle();
-      expect(find.text('Select a title to view its details.'), findsOneWidget);
+      expect(find.text('Films in theatrical release.'), findsOneWidget);
       await tester.tap(find.text('Inception').first);
       await tester.pumpAndSettle();
       expect(find.text('Runtime: 148 minutes'), findsOneWidget);
+      await tester.ensureVisible(find.text('The Dark Knight').first);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('The Dark Knight').first);
       await tester.pumpAndSettle();
       expect(find.text('Runtime: 152 minutes'), findsOneWidget);
@@ -77,7 +80,7 @@ void main() {
       expect(find.text('Runtime: 148 minutes'), findsOneWidget);
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
-      expect(find.text('Select a title to view its details.'), findsOneWidget);
+      expect(find.text('Films in theatrical release.'), findsOneWidget);
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       expect(find.text('CineVault'), findsOneWidget);
@@ -94,7 +97,7 @@ void main() {
     (tester) async {
       final store = MemoryLibraryStore()..failOpen = true;
       final harness = await _mount(tester, store: store);
-      await tester.tap(find.text('Search'));
+      await tester.tap(find.text('Search').first);
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Inception');
       await tester.pump(const Duration(milliseconds: 310));
@@ -112,7 +115,7 @@ void main() {
         find.text('Search the TMDB catalogue to find your next story.'),
         findsOneWidget,
       );
-      await tester.tap(find.text('Watchlist'));
+      await tester.tap(find.text('Watchlist').first);
       await tester.pumpAndSettle();
       expect(find.text('Unable to open your local watchlist.'), findsOneWidget);
       store.failOpen = false;
@@ -122,6 +125,79 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'keyboard search and all breakpoint shells preserve the search query',
+    (tester) async {
+      await _mount(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
+        isTrue,
+      );
+      await tester.enterText(find.byType(TextField), 'Inception');
+      await tester.pump(const Duration(milliseconds: 320));
+      await tester.pumpAndSettle();
+      for (final width in [320, 390, 599, 600, 768, 1023, 1024, 1440]) {
+        tester.view.physicalSize = Size(width.toDouble(), 900);
+        await tester.pumpAndSettle();
+        final layout = width < 600
+            ? 'mobile-bottom-nav'
+            : width < 1024
+            ? 'tablet-rail'
+            : 'desktop-sidebar';
+        expect(
+          find.byKey(ValueKey(layout)),
+          findsOneWidget,
+          reason: 'Navigation at $width',
+        );
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller?.text,
+          'Inception',
+        );
+        expect(tester.takeException(), isNull, reason: 'Layout at $width');
+      }
+    },
+  );
+
+  testWidgets('compact views lay out at 200 percent text', (tester) async {
+    final errorHandler = FlutterError.onError;
+    final errors = <FlutterErrorDetails>[];
+    FlutterError.onError = (details) {
+      errors.add(details);
+      errorHandler?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = errorHandler);
+    await _mount(tester);
+    tester.view.physicalSize = const Size(320, 740);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    for (final path in [
+      '/',
+      '/discover',
+      '/discover/movies',
+      '/discover/tv',
+      '/discover/now-playing',
+      '/search?q=Inception',
+      '/movie/27205',
+      '/library/watchlist',
+      '/library/stats',
+    ]) {
+      await tester.binding.handlePushRoute(path);
+      await tester.pumpAndSettle();
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: <String>[
+          path,
+          for (final error in errors) error.toDiagnosticsNode().toStringDeep(),
+        ].join('\n'),
+      );
+    }
+  });
 }
 
 Future<({TmdbFixture tmdb, List<PerfSample> events})> _mount(
@@ -129,7 +205,7 @@ Future<({TmdbFixture tmdb, List<PerfSample> events})> _mount(
   MemoryLibraryStore? store,
 }) async {
   tester.view.devicePixelRatio = 1;
-  tester.view.physicalSize = const Size(1000, 850);
+  tester.view.physicalSize = const Size(1440, 900);
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   final events = <PerfSample>[];

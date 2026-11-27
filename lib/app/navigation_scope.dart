@@ -8,6 +8,7 @@ class CineNavigation extends InheritedWidget {
     required this.select,
     required this.updateSearch,
     required this.back,
+    required this.searchRequests,
     required super.child,
     super.key,
   });
@@ -23,6 +24,16 @@ class CineNavigation extends InheritedWidget {
   final void Function(BuildContext, AppTab) select;
   final void Function(BuildContext, TabRoute) updateSearch;
   final void Function(BuildContext) back;
+  final ValueNotifier<int> searchRequests;
+
+  void focusSearch(BuildContext context) {
+    select(context, AppTab.search);
+    // The first search screen mounts when the route change is drawn.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.mounted) searchRequests.value++;
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
 
   static CineNavigation of(BuildContext context) =>
       context.getInheritedWidgetOfExactType<CineNavigation>()!;
