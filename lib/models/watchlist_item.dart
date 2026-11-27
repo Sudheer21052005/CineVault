@@ -2,7 +2,8 @@ import 'package:hive/hive.dart';
 
 enum WatchStatus { planToWatch, watching, watched }
 
-WatchStatus watchStatusFromString(String value) => WatchStatus.values.firstWhere(
+WatchStatus watchStatusFromString(String value) =>
+    WatchStatus.values.firstWhere(
       (status) => status.name == value,
       orElse: () => WatchStatus.planToWatch,
     );
@@ -18,22 +19,23 @@ class WatchlistItem {
     this.userRating,
     this.notes = '',
     this.review = '',
-    this.genres = const [],
+    List<String> genres = const [],
     this.dateWatched,
     DateTime? addedAt,
-  }) : addedAt = addedAt ?? DateTime.now();
+  }) : addedAt = addedAt ?? DateTime.now(),
+       genres = List.unmodifiable(genres);
 
   final int id;
   final String type;
   final String title;
   final String? posterPath;
   final double rating;
-  WatchStatus status;
-  double? userRating;
-  String notes;
-  String review;
+  final WatchStatus status;
+  final double? userRating;
+  final String notes;
+  final String review;
   final List<String> genres;
-  DateTime? dateWatched;
+  final DateTime? dateWatched;
   final DateTime addedAt;
 
   String get key => '$type-$id';
@@ -64,7 +66,9 @@ class WatchlistItemAdapter extends TypeAdapter<WatchlistItem> {
     }
     if (reader.availableBytes > 0) {
       final watchedAt = reader.read();
-      if (watchedAt is int) dateWatched = DateTime.fromMillisecondsSinceEpoch(watchedAt);
+      if (watchedAt is int) {
+        dateWatched = DateTime.fromMillisecondsSinceEpoch(watchedAt);
+      }
     }
     return WatchlistItem(
       id: id,

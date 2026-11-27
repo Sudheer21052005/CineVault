@@ -1,16 +1,21 @@
 import 'dart:async';
 
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:palette_generator/palette_generator.dart';
 import 'package:provider/provider.dart';
 
+import 'app/navigation_scope.dart';
+import 'app/route_contract.dart';
+import 'catalogue/catalogue_repository.dart';
+import 'catalogue/entity_ref.dart';
+import 'catalogue/paged_controller.dart';
+import 'core/material.dart';
+import 'core/network/tmdb_transport.dart';
+import 'core/performance.dart';
 import 'models/media.dart';
 import 'models/watchlist_item.dart';
 import 'providers/watchlist_provider.dart';
-import 'services/tmdb_service.dart';
 
 class LruCache<K, V> {
   final int maxSize;
@@ -188,147 +193,63 @@ class _NavItem {
   final String label;
 }
 
-class CineVaultApp extends StatelessWidget {
-  const CineVaultApp({super.key});
-  @override
-  Widget build(BuildContext context) => MaterialApp(
-    debugShowCheckedModeBanner: false,
-    title: 'CineVault',
-    theme: cineTheme(),
-    home: const StartupPage(),
-  );
-}
-
-class StartupPage extends StatefulWidget {
-  const StartupPage({super.key});
-  @override
-  State<StartupPage> createState() => _StartupPageState();
-}
-
-class _StartupPageState extends State<StartupPage>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1500),
-  )..forward();
-  @override
-  void initState() {
-    super.initState();
-    Timer(const Duration(milliseconds: 1700), () {
-      if (mounted) {
-        Navigator.of(
-          context,
-        ).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell()));
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Center(
-      child: FadeTransition(
-        opacity: CurvedAnimation(parent: controller, curve: Curves.easeOut),
-        child: ScaleTransition(
-          scale: Tween(begin: .82, end: 1.0).animate(
-            CurvedAnimation(parent: controller, curve: Curves.easeOutCubic),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SvgPicture.asset(
-                'assets/images/branding/cinevault_emblem.svg',
-                width: 90,
-                height: 90,
-              ),
-              const SizedBox(height: 18),
-              const Text(
-                'CineVault',
-                style: TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'DISCOVER \u00B7 COLLECT \u00B7 REMEMBER',
-                style: TextStyle(color: muted, fontSize: 10, letterSpacing: 2),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({
+    required this.tab,
+    required this.searchRoute,
+    required this.covered,
+    super.key,
+  });
+
+  final AppTab tab;
+  final TabRoute searchRoute;
+  final bool covered;
+
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends State<MainShell> {
-  int index = 0;
-  final service = TmdbService();
-  final pages = const [
-    HomePage(),
-    NowPlayingPage(),
-    TvShowsPage(),
-    SearchPage(),
-    WatchlistPage(),
-    StatisticsPage(),
-  ];
-  void setTab(int i) => setState(() => index = i);
+  final _visited = <AppTab>{};
+
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: false,
-    onPopInvokedWithResult: (didPop, _) async {
-      if (didPop) return;
-      // If not on home tab, navigate home first
-      if (index != 0) {
-        setState(() => index = 0);
-        return;
-      }
-      // On home tab: show exit confirmation
-      final shouldExit = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Exit CineVault?', style: TextStyle(fontWeight: FontWeight.w700)),
-          content: const Text('Are you sure you want to exit the app?', style: TextStyle(color: muted)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Stay'),
+  Widget build(BuildContext context) {
+    _visited.add(widget.tab);
+    final navigation = CineNavigation.of(context);
+    return Scaffold(
+      body: IndexedStack(
+        index: widget.tab.index,
+        children: [
+          for (final tab in AppTab.values)
+            TickerMode(
+              enabled: tab == widget.tab && !widget.covered,
+              child: HeroMode(
+                enabled: tab == widget.tab,
+                child: ExcludeFocus(
+                  excluding: tab != widget.tab,
+                  child: _visited.contains(tab)
+                      ? switch (tab) {
+                          AppTab.home => const HomePage(),
+                          AppTab.nowPlaying => const NowPlayingPage(),
+                          AppTab.tv => const TvShowsPage(),
+                          AppTab.search => SearchPage(
+                            location: widget.searchRoute,
+                          ),
+                          AppTab.watchlist => const WatchlistPage(),
+                          AppTab.stats => const StatisticsPage(),
+                        }
+                      : const SizedBox.shrink(),
+                ),
+              ),
             ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: primary),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Exit'),
-            ),
-          ],
-        ),
-      );
-      if (shouldExit == true && context.mounted) {
-        SystemNavigator.pop();
-      }
-    },
-    child: Scaffold(
-      body: IndexedStack(index: index, children: pages),
-      bottomNavigationBar: CompactBottomNav(
-        currentIndex: index,
-        onTap: (value) => setState(() => index = value),
+        ],
       ),
-    ),
-  );
+      bottomNavigationBar: CompactBottomNav(
+        currentIndex: widget.tab.index,
+        onTap: (index) => navigation.select(context, AppTab.values[index]),
+      ),
+    );
+  }
 }
 
 class HomePage extends StatefulWidget {
@@ -338,13 +259,29 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  Key _refreshKey = UniqueKey();
+  final _heroKey = GlobalKey<_HeroCarouselState>();
+  final _recommendationsKey = GlobalKey<_RecommendationsSectionState>();
+  final _shelves = {
+    for (final feed in const [
+      CatalogueFeed.trending,
+      CatalogueFeed.popular,
+      CatalogueFeed.nowPlaying,
+      CatalogueFeed.recent,
+      CatalogueFeed.upcoming,
+      CatalogueFeed.topRated,
+      CatalogueFeed.tvPopular,
+      CatalogueFeed.tvToday,
+      CatalogueFeed.tvOnAir,
+    ])
+      feed: GlobalKey<_PagedHorizontalSectionState>(),
+  };
 
-  Future<void> _onRefresh() async {
-    TmdbService.clearCache();
-    if (mounted) setState(() => _refreshKey = UniqueKey());
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-  }
+  Future<void> _onRefresh() => Future.wait<void>([
+    if (_heroKey.currentState case final hero?) hero.refresh(),
+    for (final key in _shelves.values)
+      if (key.currentState case final shelf?) shelf.refresh(),
+    if (_recommendationsKey.currentState case final shelf?) shelf.refresh(),
+  ]);
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -352,7 +289,7 @@ class _HomePageState extends State<HomePage> {
     body: RefreshIndicator(
       onRefresh: _onRefresh,
       child: CustomScrollView(
-        key: _refreshKey,
+        scrollCacheExtent: const ScrollCacheExtent.pixels(0),
         slivers: [
           SliverAppBar(
             pinned: true,
@@ -382,9 +319,7 @@ class _HomePageState extends State<HomePage> {
             actions: [
               IconButton(
                 onPressed: () {
-                  final shell = context
-                      .findAncestorStateOfType<_MainShellState>();
-                  shell?.setTab(3);
+                  CineNavigation.of(context).select(context, AppTab.search);
                 },
                 icon: const Icon(Icons.search_rounded, size: 24),
                 tooltip: 'Search',
@@ -401,7 +336,7 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             sliver: SliverList.list(
               children: [
-                const HeroCarousel(),
+                HeroCarousel(key: _heroKey),
                 const SizedBox(height: 16),
                 const Text(
                   'Explore genres',
@@ -427,38 +362,15 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          SliverList.list(
-            children: [
-              Section(
-                title: 'Trending this week',
-                loader: TmdbService().trendingMovies(),
-                path: '/trending/movie/week',
-              ),
-              const Section(title: 'Popular movies', path: '/movie/popular'),
-              const Section(title: 'Now playing', path: '/movie/now_playing'),
-              Section(
-                title: 'Recently released',
-                path: '/discover/movie',
-                initialPage: TmdbService().recentMoviesPage(),
-                pageLoader: (page) =>
-                    TmdbService().recentMoviesPage(page: page),
-              ),
-              Section(
-                title: 'Upcoming releases',
-                path: '/movie/upcoming',
-                initialPage: TmdbService().upcomingMoviesPage(),
-                pageLoader: (page) =>
-                    TmdbService().upcomingMoviesPage(page: page),
-              ),
-              const Section(
-                title: 'Top rated movies',
-                path: '/movie/top_rated',
-              ),
-              const TvSection(title: 'Popular TV shows', path: '/tv/popular'),
-              const TvSection(title: 'Airing today', path: '/tv/airing_today'),
-              const TvSection(title: 'On the air', path: '/tv/on_the_air'),
-              const RecommendationsSection(),
-            ],
+          SliverList.builder(
+            itemCount: _shelves.length + 1,
+            itemBuilder: (context, index) {
+              if (index == _shelves.length) {
+                return RecommendationsSection(key: _recommendationsKey);
+              }
+              final feed = _shelves.keys.elementAt(index);
+              return PagedHorizontalSection(key: _shelves[feed], feed: feed);
+            },
           ),
         ],
       ),
@@ -484,14 +396,40 @@ class _HeroCarouselState extends State<HeroCarousel> {
   @override
   void initState() {
     super.initState();
-    future = TmdbService().popularMovies();
-    autoAdvance = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (!mounted || items.length < 2 || !controller.hasClients) return;
-      controller.nextPage(
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOutCubic,
-      );
-    });
+    future = _load();
+  }
+
+  Future<List<Media>> _load({bool refresh = false}) async =>
+      (await context.read<CatalogueRepository>().browseFeed(
+        CatalogueFeed.popular,
+        refresh: refresh,
+      )).items;
+
+  Future<void> refresh() async {
+    final request = _load(refresh: true);
+    setState(() => future = request);
+    try {
+      await request;
+    } catch (_) {
+      // FutureBuilder renders the error and a fresh retry action.
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    autoAdvance?.cancel();
+    if (TickerMode.valuesOf(context).enabled &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      autoAdvance = Timer.periodic(const Duration(seconds: 6), (_) {
+        if (items.length < 2 || !controller.hasClients) return;
+        controller.animateToPage(
+          (page + 1) % items.length,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeOutCubic,
+        );
+      });
+    }
   }
 
   @override
@@ -506,7 +444,7 @@ class _HeroCarouselState extends State<HeroCarousel> {
       if (mounted) setState(() => _ambientColor = null);
       return;
     }
-    final cacheKey = '${media.type}-${media.id}';
+    final cacheKey = media.key;
     final cached = _ambientColorCache.get(cacheKey);
     if (cached != null) {
       if (mounted) setState(() => _ambientColor = cached);
@@ -514,7 +452,9 @@ class _HeroCarouselState extends State<HeroCarousel> {
     }
     try {
       final palette = await PaletteGenerator.fromImageProvider(
-        NetworkImage('${TmdbService.backdropBase}${media.backdropPath}'),
+        NetworkImage(
+          '${CatalogueRepository.backdropBase}${media.backdropPath}',
+        ),
         maximumColorCount: 16,
       );
       final color =
@@ -530,10 +470,14 @@ class _HeroCarouselState extends State<HeroCarousel> {
           1.0,
         );
         _ambientColorCache.put(cacheKey, adjusted);
-        if (mounted) setState(() => _ambientColor = adjusted);
+        if (mounted && items.elementAtOrNull(page)?.key == cacheKey) {
+          setState(() => _ambientColor = adjusted);
+        }
       }
     } catch (_) {
-      if (mounted) setState(() => _ambientColor = null);
+      if (mounted && items.elementAtOrNull(page)?.key == cacheKey) {
+        setState(() => _ambientColor = null);
+      }
     }
   }
 
@@ -541,10 +485,11 @@ class _HeroCarouselState extends State<HeroCarousel> {
   Widget build(BuildContext context) => FutureBuilder<List<Media>>(
     future: future,
     builder: (_, snapshot) {
-      if (snapshot.connectionState == ConnectionState.waiting) {
+      if (snapshot.connectionState == ConnectionState.waiting &&
+          items.isEmpty) {
         return const SkeletonBox(height: 220);
       }
-      if (snapshot.hasError) {
+      if (snapshot.hasError && items.isEmpty) {
         return Container(
           height: 180,
           margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -566,9 +511,7 @@ class _HeroCarouselState extends State<HeroCarousel> {
                 const SizedBox(height: 10),
                 TextButton.icon(
                   onPressed: () {
-                    setState(() {
-                      future = TmdbService().popularMovies();
-                    });
+                    refresh();
                   },
                   icon: const Icon(Icons.refresh_rounded, size: 16),
                   label: const Text('Retry'),
@@ -578,7 +521,9 @@ class _HeroCarouselState extends State<HeroCarousel> {
           ),
         );
       }
-      items = snapshot.data?.take(5).toList() ?? [];
+      if (snapshot.hasData) {
+        items = snapshot.data!.take(5).toList();
+      }
       if (items.isEmpty) return const SizedBox.shrink();
       if (!_firstAmbientLoaded && items.isNotEmpty) {
         _firstAmbientLoaded = true;
@@ -610,17 +555,15 @@ class _HeroCarouselState extends State<HeroCarousel> {
               itemCount: items.length,
               onPageChanged: (value) {
                 setState(() => page = value);
-                _updateAmbientColor(items[value]);
+                if (items.elementAtOrNull(value) case final media?) {
+                  _updateAmbientColor(media);
+                }
               },
               itemBuilder: (_, index) {
                 final media = items[index];
                 return GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MediaDetailsPage(media: media),
-                    ),
-                  ),
+                  onTap: () =>
+                      CineNavigation.of(context).openTitle(context, media),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
                     child: Stack(
@@ -629,7 +572,7 @@ class _HeroCarouselState extends State<HeroCarousel> {
                         media.backdropPath == null
                             ? Container(color: elevated)
                             : Image.network(
-                                '${TmdbService.backdropBase}${media.backdropPath}',
+                                '${CatalogueRepository.backdropBase}${media.backdropPath}',
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, _, _) =>
                                     Container(color: elevated),
@@ -686,13 +629,9 @@ class _HeroCarouselState extends State<HeroCarousel> {
                               ),
                               const SizedBox(height: 8),
                               FilledButton.tonalIcon(
-                                onPressed: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        MediaDetailsPage(media: media),
-                                  ),
-                                ),
+                                onPressed: () =>
+                                    CineNavigation.of(context)
+                                        .openTitle(context, media),
                                 icon: const Icon(
                                   Icons.visibility_outlined,
                                   size: 15,
@@ -816,6 +755,15 @@ class _HeroCarouselState extends State<HeroCarousel> {
                 ),
               ),
             ),
+            if (snapshot.hasError)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: FilledButton.tonal(
+                  onPressed: refresh,
+                  child: const Text('Retry featured titles'),
+                ),
+              ),
           ],
         ),
       );
@@ -834,16 +782,10 @@ class GenreChip extends StatelessWidget {
     child: ActionChip(
       label: Text(label),
       avatar: const Icon(Icons.local_movies_outlined, size: 15),
-      onPressed: () => Navigator.push(
+      onPressed: () => CineNavigation.of(context).open(
         context,
-        MaterialPageRoute(
-          builder: (_) => DiscoveryPage(
-            title: '$label movies',
-            loader: TmdbService().discoverPage(genreId: genreId),
-            pageLoader: (page) =>
-                TmdbService().discoverPage(genreId: genreId, page: page),
-          ),
-        ),
+        GenreRoute((kind: MediaKind.movie, id: genreId)),
+        label: '$label movies',
       ),
     ),
   );
@@ -909,226 +851,138 @@ class FilterField<T> extends StatelessWidget {
   );
 }
 
-class Section extends StatelessWidget {
-  const Section({
-    required this.title,
-    required this.path,
-    this.loader,
-    this.initialPage,
-    this.pageLoader,
-    super.key,
-  });
-  final String title;
-  final String path;
-  final Future<List<Media>>? loader;
-  final Future<TmdbPage>? initialPage;
-  final Future<TmdbPage> Function(int page)? pageLoader;
-
-  @override
-  Widget build(BuildContext context) => PagedHorizontalSection(
-    title: title,
-    path: path,
-    initialPage:
-        initialPage ??
-        (loader == null ? TmdbService().pageResults(path) : _asPage(loader!)),
-    pageLoader:
-        pageLoader ?? (page) => TmdbService().pageResults(path, page: page),
-  );
-
-  Future<TmdbPage> _asPage(Future<List<Media>> source) async {
-    final items = await source;
-    return TmdbPage(
-      items: items,
-      page: 1,
-      totalPages: items.isEmpty ? 1 : 500,
-      totalResults: items.length,
-    );
-  }
-}
-
 class PagedHorizontalSection extends StatefulWidget {
-  const PagedHorizontalSection({
-    required this.title,
-    required this.path,
-    required this.initialPage,
-    required this.pageLoader,
-    super.key,
-  });
-  final String title;
-  final String path;
-  final Future<TmdbPage> initialPage;
-  final Future<TmdbPage> Function(int page) pageLoader;
+  const PagedHorizontalSection({required this.feed, this.title, super.key});
+
+  final CatalogueFeed feed;
+  final String? title;
 
   @override
   State<PagedHorizontalSection> createState() => _PagedHorizontalSectionState();
 }
 
-class _PagedHorizontalSectionState extends State<PagedHorizontalSection> {
-  final controller = ScrollController();
-  final items = <Media>[];
-  late Future<TmdbPage> initial;
-  int page = 1;
-  int totalPages = 1;
-  bool loadingMore = false;
-  bool hasError = false;
+class _PagedHorizontalSectionState extends State<PagedHorizontalSection>
+    with AutomaticKeepAliveClientMixin {
+  final _scroll = ScrollController();
+  final _pages = PagedController();
+
+  String get _title => widget.title ?? widget.feed.label;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    initial = _loadInitial();
-    controller.addListener(_onScroll);
-  }
-
-  Future<TmdbPage> _loadInitial() async {
-    final result = await widget.initialPage;
-    _append(result.items);
-    page = result.page;
-    totalPages = result.totalPages;
-    return result;
-  }
-
-  void _append(List<Media> next) {
-    final keys = items.map((item) => item.key).toSet();
-    items.addAll(next.where((item) => keys.add(item.key)));
-  }
-
-  void _onScroll() {
-    if (!controller.hasClients ||
-        loadingMore ||
-        page >= totalPages ||
-        page >= 500) {
-      return;
-    }
-    if (controller.position.pixels >=
-        controller.position.maxScrollExtent * .7) {
-      _loadMore();
-    }
-  }
-
-  Future<void> _loadMore() async {
-    if (loadingMore || page >= totalPages || page >= 500) return;
-    setState(() {
-      loadingMore = true;
-      hasError = false;
-    });
-    try {
-      final result = await widget.pageLoader(page + 1);
-      if (!mounted) return;
-      setState(() {
-        _append(result.items);
-        page = result.page;
-        totalPages = result.totalPages;
-        loadingMore = false;
-      });
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          loadingMore = false;
-          hasError = true;
-        });
+    _pages.setQuery(
+      context.read<CatalogueRepository>().feedLoader(widget.feed),
+    );
+    _scroll.addListener(() {
+      if (_scroll.position.extentAfter <=
+          _scroll.position.viewportDimension * .65) {
+        unawaited(_pages.loadNext());
       }
-    }
+    });
   }
+
+  Future<void> refresh() => _pages.refresh();
 
   @override
   void dispose() {
-    controller.dispose();
+    _scroll.dispose();
+    _pages.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<TmdbPage>(
-    future: initial,
-    builder: (context, snapshot) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 22),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget build(BuildContext context) {
+    super.build(context);
+    return ListenableBuilder(
+      listenable: _pages,
+      builder: (context, _) {
+        final state = _pages.state;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              widget.title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            TextButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => DiscoveryPage(
-                    title: widget.title,
-                    loader: widget.initialPage,
-                    pageLoader: widget.pageLoader,
+            const SizedBox(height: 22),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Text(
+                    _title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-              icon: const Icon(Icons.arrow_forward, size: 16),
-              label: const Text('See all'),
+                TextButton.icon(
+                  onPressed: () =>
+                      CineNavigation.of(context)
+                          .open(context, FeedRoute(widget.feed), label: _title),
+                  icon: const Icon(Icons.arrow_forward, size: 16),
+                  label: const Text('See all'),
+                ),
+              ],
             ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (snapshot.connectionState == ConnectionState.waiting)
-          const SizedBox(
-            height: 220,
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          )
-        else if (snapshot.hasError)
-          MessageState(
-            message: snapshot.error.toString().replaceFirst(
-              'TMDB request failed: ',
-              '',
-            ),
-            onRetry: () => setState(() => initial = _loadInitial()),
-          )
-        else if (items.isEmpty)
-          const MessageState(message: 'No titles available right now.')
-        else
-          SizedBox(
-            height: 250,
-            child: ListView.separated(
-              controller: controller,
-              scrollDirection: Axis.horizontal,
-              itemCount: items.length + (loadingMore || hasError ? 1 : 0),
-              separatorBuilder: (_, _) => const SizedBox(width: 12),
-              itemBuilder: (_, i) {
-                if (i == items.length) {
-                  return Center(
-                    child: hasError
-                        ? IconButton(
-                            onPressed: _loadMore,
-                            icon: const Icon(Icons.refresh),
-                          )
-                        : const SizedBox(
-                            width: 28,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+            const SizedBox(height: 12),
+            if (state.status == PageStatus.loading)
+              const SizedBox(
+                height: 220,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              )
+            else ...[
+              if (state.status == PageStatus.refreshing)
+                const LinearProgressIndicator(),
+              if (state.error != null)
+                MessageState(
+                  message: _catalogueMessage(state.error),
+                  onRetry: refresh,
+                ),
+              if (state.items.isEmpty && state.status == PageStatus.ready)
+                const MessageState(message: 'No titles available right now.'),
+              if (state.items.isNotEmpty)
+                SizedBox(
+                  height: 250,
+                  child: ListView.separated(
+                    controller: _scroll,
+                    scrollDirection: Axis.horizontal,
+                    itemCount:
+                        state.items.length +
+                        (state.loadingNext || state.nextError != null ? 1 : 0),
+                    separatorBuilder: (_, _) => const SizedBox(width: 12),
+                    itemBuilder: (_, index) => index == state.items.length
+                        ? Center(child: _nextPageAction(_pages, state))
+                        : MediaCard(
+                            media: state.items[index],
+                            heroTag: '$_title-${state.items[index].key}',
                           ),
-                  );
-                }
-                return MediaCard(
-                  media: items[i],
-                  heroTag: '${widget.title}-${items[i].key}',
-                );
-              },
-            ),
-          ),
-      ],
-    ),
-  );
+                  ),
+                ),
+            ],
+          ],
+        );
+      },
+    );
+  }
 }
 
 class NowPlayingPage extends StatelessWidget {
   const NowPlayingPage({super.key});
+
   @override
   Widget build(BuildContext context) => DiscoveryPage(
     title: 'Now Playing',
-    loader: TmdbService().pageResults('/movie/now_playing'),
-    pageLoader: (page) =>
-        TmdbService().pageResults('/movie/now_playing', page: page),
+    loader: context.read<CatalogueRepository>().feedLoader(
+      CatalogueFeed.nowPlaying,
+    ),
   );
 }
 
 class TvShowsPage extends StatelessWidget {
   const TvShowsPage({super.key});
+
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(20),
@@ -1138,157 +992,122 @@ class TvShowsPage extends StatelessWidget {
         style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
       ),
       SizedBox(height: 18),
-      TvSection(title: 'Popular', path: '/tv/popular'),
-      TvSection(title: 'Airing today', path: '/tv/airing_today'),
-      TvSection(title: 'Top rated', path: '/tv/top_rated'),
+      PagedHorizontalSection(feed: CatalogueFeed.tvPopular, title: 'Popular'),
+      PagedHorizontalSection(feed: CatalogueFeed.tvToday),
+      PagedHorizontalSection(feed: CatalogueFeed.tvTopRated),
     ],
   );
 }
 
-class TvSection extends StatelessWidget {
-  const TvSection({required this.title, required this.path, super.key});
-  final String title;
-  final String path;
+class RecommendationsSection extends StatefulWidget {
+  const RecommendationsSection({super.key});
+
   @override
-  Widget build(BuildContext context) => PagedHorizontalSection(
-    title: title,
-    path: path,
-    initialPage: TmdbService().pageResults(path, type: 'tv'),
-    pageLoader: (page) =>
-        TmdbService().pageResults(path, type: 'tv', page: page),
-  );
+  State<RecommendationsSection> createState() => _RecommendationsSectionState();
 }
 
-class RecommendationsSection extends StatelessWidget {
-  const RecommendationsSection({super.key});
+class _RecommendationsSectionState extends State<RecommendationsSection> {
+  EntityRef? _seed;
+  Future<List<Media>>? _future;
+
   @override
-  Widget build(BuildContext context) => Consumer<WatchlistProvider>(
-    builder: (_, provider, _) {
-      final seed = provider.items.isEmpty ? null : provider.items.first;
-      if (seed == null) return const SizedBox.shrink();
-      final media = Media(
-        id: seed.id,
-        type: seed.type,
-        title: seed.title,
-        posterPath: seed.posterPath,
-        genres: seed.genres,
-      );
-      return FutureBuilder<List<Media>>(
-        future: TmdbService().similar(media),
-        builder: (_, snapshot) {
-          final items =
-              snapshot.data
-                  ?.where((item) => provider.find(item.id, item.type) == null)
-                  .take(8)
-                  .toList() ??
-              [];
-          if (items.isEmpty) return const SizedBox.shrink();
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 22),
-              const Text(
-                'Picked for your collection',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Based on titles you saved',
-                style: TextStyle(color: muted),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 235,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: items.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (_, index) => MediaCard(
-                    media: items[index],
-                    heroTag: 'recommendations-${items[index].key}',
-                  ),
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final item = context.watch<WatchlistProvider>().items.firstOrNull;
+    final kind = MediaKind.parse(item?.type);
+    final seed = item == null || kind == null
+        ? null
+        : (kind: kind.entityKind, id: item.id);
+    if (seed == _seed) return;
+    _seed = seed;
+    _future = seed == null
+        ? null
+        : context.read<CatalogueRepository>().related(seed);
+  }
+
+  Future<void> refresh() async {
+    final seed = _seed;
+    if (seed == null) return;
+    final future = context.read<CatalogueRepository>().related(
+      seed,
+      refresh: true,
+    );
+    setState(() => _future = future);
+    try {
+      await future;
+    } catch (_) {
+      // This optional Home shelf can be retried on the next Home refresh.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_seed == null) return const SizedBox.shrink();
+    final library = context.read<WatchlistProvider>();
+    return FutureBuilder<List<Media>>(
+      future: _future,
+      builder: (_, snapshot) {
+        final items = (snapshot.data ?? const <Media>[])
+            .where((item) => library.find(item.id, item.type) == null)
+            .take(8)
+            .toList();
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 22),
+            const Text(
+              'Picked for your collection',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Based on titles you saved',
+              style: TextStyle(color: muted),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 235,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
+                itemBuilder: (_, index) => MediaCard(
+                  media: items[index],
+                  heroTag: 'recommendations-${items[index].key}',
                 ),
               ),
-            ],
-          );
-        },
-      );
-    },
-  );
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class DiscoveryPage extends StatefulWidget {
-  const DiscoveryPage({
-    required this.title,
-    required this.loader,
-    this.pageLoader,
-    super.key,
-  });
+  const DiscoveryPage({required this.title, required this.loader, super.key});
+
   final String title;
-  final Future<TmdbPage> loader;
-  final Future<TmdbPage> Function(int page)? pageLoader;
+  final PageLoader loader;
+
   @override
   State<DiscoveryPage> createState() => _DiscoveryPageState();
 }
 
 class _DiscoveryPageState extends State<DiscoveryPage> {
-  late Future<List<Media>> initialLoad;
-  final items = <Media>[];
-  int page = 1;
-  int totalPages = 1;
-  bool loadingMore = false;
-  bool reachedEnd = false;
+  final _pages = PagedController();
 
   @override
   void initState() {
     super.initState();
-    initialLoad = _loadInitial();
+    _pages.setQuery(widget.loader);
   }
 
-  Future<List<Media>> _loadInitial() async {
-    final loaded = await widget.loader;
-    _append(loaded.items);
-    page = loaded.page;
-    totalPages = loaded.totalPages;
-    reachedEnd = !loaded.hasMore;
-    return loaded.items;
-  }
-
-  void _append(List<Media> next) {
-    final existing = items.map((item) => item.key).toSet();
-    items.addAll(next.where((item) => existing.add(item.key)));
-  }
-
-  Future<void> _loadMore() async {
-    if (widget.pageLoader == null || loadingMore || reachedEnd) return;
-    setState(() => loadingMore = true);
-    try {
-      final next = await widget.pageLoader!(page + 1);
-      if (!mounted) return;
-      setState(() {
-        page++;
-        _append(next.items);
-        reachedEnd = !next.hasMore;
-        totalPages = next.totalPages;
-        loadingMore = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => loadingMore = false);
-    }
-  }
-
-  Future<void> _refresh() async {
-    final refreshed = await widget.loader;
-    if (!mounted) return;
-    setState(() {
-      items
-        ..clear()
-        ..addAll(refreshed.items);
-      page = refreshed.page;
-      totalPages = refreshed.totalPages;
-      reachedEnd = !refreshed.hasMore;
-      loadingMore = false;
-    });
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
   }
 
   @override
@@ -1296,245 +1115,321 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     backgroundColor: canvas,
     appBar: AppBar(
       backgroundColor: canvas,
-      leading: IconButton(
-        tooltip: 'Back to home',
-        onPressed: () => Navigator.of(context).pop(),
-        icon: const Icon(Icons.arrow_back),
+      leading: BackButton(
+        onPressed: () => CineNavigation.of(context).back(context),
       ),
       title: Text(
         widget.title,
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
     ),
-    body: FutureBuilder<List<Media>>(
-      future: initialLoad,
-      builder: (context, snapshot) => RefreshIndicator(
-        onRefresh: _refresh,
-        child: NotificationListener<ScrollNotification>(
-          onNotification: (notification) {
-            if (notification.metrics.pixels >=
-                notification.metrics.maxScrollExtent - 500) {
-              _loadMore();
-            }
-            return false;
-          },
-          child: ListView(
-            key: const PageStorageKey<String>('discovery-list'),
-            addAutomaticKeepAlives: true,
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-            children: [
-              Text(
-                widget.title == 'Popular movies'
-                    ? 'Popular movies this week'
-                    : widget.title,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Select a title to view its details.',
-                style: TextStyle(color: muted),
-              ),
-              const SizedBox(height: 18),
-              if (snapshot.connectionState == ConnectionState.waiting)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(60),
-                    child: CircularProgressIndicator(),
-                  ),
-                )
-              else if (snapshot.hasError)
-                MessageState(message: snapshot.error.toString())
-              else if (snapshot.data?.isEmpty ?? true)
-                const MessageState(message: 'No titles available.')
-              else
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: items.length + (loadingMore ? 1 : 0),
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 190,
-                    mainAxisExtent: 300,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 20,
-                  ),
-                  itemBuilder: (_, i) {
-                    if (i == items.length) {
-                      return const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(20),
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      );
-                    }
-                    return MediaCard(
-                      media: items[i],
-                      heroTag: '${widget.title}-${items[i].key}',
-                    );
-                  },
-                ),
-            ],
-          ),
+    body: RefreshIndicator(
+      onRefresh: _pages.refresh,
+      child: _PagedViewport(
+        pages: _pages,
+        cardWidth: 190,
+        cardHeight: 300,
+        heroPrefix: widget.title,
+        emptyMessage: 'No titles available.',
+        header: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.title,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Select a title to view its details.',
+              style: TextStyle(color: muted),
+            ),
+            const SizedBox(height: 18),
+          ],
         ),
       ),
     ),
   );
 }
 
+class _PagedViewport extends StatelessWidget {
+  const _PagedViewport({
+    required this.pages,
+    required this.header,
+    required this.heroPrefix,
+    required this.emptyMessage,
+    required this.cardWidth,
+    required this.cardHeight,
+    this.scroll,
+    this.onFirstPaint,
+    this.idleMessage,
+  });
+
+  final PagedController pages;
+  final Widget header;
+  final ScrollController? scroll;
+  final VoidCallback? onFirstPaint;
+  final String heroPrefix;
+  final String emptyMessage;
+  final String? idleMessage;
+  final double cardWidth;
+  final double cardHeight;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: pages,
+    builder: (context, _) {
+      final state = pages.state;
+      if (state.status == PageStatus.ready ||
+          state.status == PageStatus.failed) {
+        if (onFirstPaint != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => onFirstPaint!());
+        }
+      }
+      return NotificationListener<ScrollNotification>(
+        onNotification: (event) {
+          if (event.depth == 0 &&
+              event.metrics.axis == Axis.vertical &&
+              (event is ScrollUpdateNotification ||
+                  event is ScrollEndNotification) &&
+              event.metrics.extentAfter < 500) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) unawaited(pages.loadNext());
+            });
+          }
+          return false;
+        },
+        child: CustomScrollView(
+          controller: scroll,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                idleMessage == null ? 8 : 20,
+                20,
+                0,
+              ),
+              sliver: SliverToBoxAdapter(child: header),
+            ),
+            if (state.status == PageStatus.idle && idleMessage != null)
+              SliverToBoxAdapter(child: MessageState(message: idleMessage!)),
+            if (state.status == PageStatus.loading ||
+                state.status == PageStatus.refreshing)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              ),
+            if (state.error != null)
+              SliverToBoxAdapter(
+                child: MessageState(
+                  message: _catalogueMessage(state.error),
+                  onRetry: pages.refresh,
+                ),
+              ),
+            if (state.items.isEmpty && state.status == PageStatus.ready)
+              SliverToBoxAdapter(child: MessageState(message: emptyMessage)),
+            if (state.items.isNotEmpty)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                sliver: SliverGrid.builder(
+                  itemCount: state.items.length,
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: cardWidth,
+                    mainAxisExtent: cardHeight,
+                    crossAxisSpacing: 14,
+                    mainAxisSpacing: 20,
+                  ),
+                  itemBuilder: (_, index) {
+                    final item = state.items[index];
+                    return MediaCard(
+                      media: item,
+                      heroTag: '$heroPrefix-${item.key}',
+                    );
+                  },
+                ),
+              ),
+            if (state.loadingNext ||
+                state.nextError != null ||
+                (state.hasMore &&
+                    state.items.isEmpty &&
+                    state.status == PageStatus.ready))
+              SliverToBoxAdapter(
+                child: Center(child: _nextPageAction(pages, state)),
+              ),
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Widget _nextPageAction(PagedController pages, PageState state) {
+  if (state.loadingNext) {
+    return const Padding(
+      padding: EdgeInsets.all(14),
+      child: SizedBox.square(
+        dimension: 26,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+  }
+  return TextButton(
+    onPressed: () => pages.loadNext(retry: state.nextError != null),
+    child: Text(state.nextError == null ? 'Load more' : 'Retry loading more'),
+  );
+}
+
+String _catalogueMessage(Object? error) => error is TmdbException
+    ? error.toString()
+    : 'Unable to load catalogue data. Please retry.';
+
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({required this.location, super.key});
+
+  final TabRoute location;
+
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
 
 class _SearchPageState extends State<SearchPage> {
-  final controller = TextEditingController();
-  final scrollController = ScrollController();
-  Timer? timer;
-  Future<List<Media>>? result;
-  List<Media> results = [];
-  int searchPage = 1;
-  int searchTotalPages = 1;
-  bool loadingMore = false;
-  int requestToken = 0;
-  bool searching = false;
-  String type = 'movie';
-  int? genreId;
-  int? year;
-  double? minimumRating;
-  String sortBy = 'popularity.desc';
-  static const genres = <int, String>{
-    28: 'Action',
-    35: 'Comedy',
-    18: 'Drama',
-    27: 'Horror',
-    878: 'Science Fiction',
-    10749: 'Romance',
-  };
+  final _text = TextEditingController();
+  final _scroll = ScrollController();
+  late final _pages = PagedController(
+    onFirstPage: (success) {
+      _firstOutcome = success ? PerfOutcome.success : PerfOutcome.failure;
+    },
+  );
+  late TabRoute _location;
+  Stopwatch? _inputWatch;
+  PerfOutcome? _firstOutcome;
+
   @override
-  void dispose() {
-    timer?.cancel();
-    controller.dispose();
-    scrollController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _setLocation(widget.location, immediate: true);
   }
 
-  void search(String value, {bool immediate = false}) {
-    timer?.cancel();
-    final query = value.trim();
-    if (query.isEmpty &&
-        genreId == null &&
-        year == null &&
-        minimumRating == null) {
-      setState(() {
-        result = null;
-        results = [];
-        searching = false;
-      });
+  @override
+  void didUpdateWidget(covariant SearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.location.uri != _location.uri) {
+      _setLocation(widget.location, immediate: true);
+    }
+  }
+
+  void _setLocation(
+    TabRoute location, {
+    required bool immediate,
+    bool synchronize = true,
+  }) {
+    _location = location;
+    if (synchronize && _text.text != location.text) {
+      _text.value = TextEditingValue(
+        text: location.text,
+        selection: TextSelection.collapsed(offset: location.text.length),
+      );
+    }
+    final repository = context.read<CatalogueRepository>();
+    final filters = location.discovery;
+    final query = location.text.trim();
+    _firstOutcome = null;
+    if (filters == null && query.isEmpty) {
+      _inputWatch = null;
+      _pages.setQuery(null);
       return;
     }
-    void start() {
-      if (!mounted) return;
-      final token = ++requestToken;
-      setState(() {
-        searching = true;
-        results = [];
-        searchPage = 1;
-        searchTotalPages = 1;
-        result = query.isNotEmpty
-            ? TmdbService().searchPage(query).then((page) {
-                if (mounted && token == requestToken) {
-                  setState(() {
-                    results = page.items;
-                    searchTotalPages = page.totalPages;
-                    searching = false;
-                  });
-                }
-                return page.items;
-              })
-            : TmdbService()
-                  .discoverPage(
-                    type: type,
-                    genreId: genreId,
-                    year: year,
-                    minimumRating: minimumRating,
-                    sortBy: sortBy,
-                  )
-                  .then((page) {
-                    if (mounted && token == requestToken) {
-                      setState(() {
-                        results = page.items;
-                        searchTotalPages = page.totalPages;
-                        searching = false;
-                      });
-                    }
-                    return page.items;
-                  });
-      });
-    }
-
-    if (immediate) {
-      start();
+    _inputWatch = Stopwatch()..start();
+    context.read<AppPerformance>().record(
+      const PerfSample(
+        PerfEvent.searchInput,
+        Duration.zero,
+        area: PerfArea.search,
+      ),
+    );
+    if (filters != null) {
+      _pages.setQuery(
+        (page, {required refresh}) =>
+            repository.discover(filters, page: page, refresh: refresh),
+      );
     } else {
-      timer = Timer(const Duration(milliseconds: 450), start);
+      _pages.setQuery(
+        (page, {required refresh}) => repository.search(
+          query,
+          location.scope,
+          page: page,
+          refresh: refresh,
+        ),
+        debounce: immediate ? Duration.zero : const Duration(milliseconds: 300),
+      );
     }
   }
 
-  Future<void> _loadMoreSearch() async {
-    final query = controller.text.trim();
-    if (loadingMore ||
-        searchPage >= searchTotalPages ||
-        (query.isEmpty &&
-            genreId == null &&
-            year == null &&
-            minimumRating == null)) {
-      return;
-    }
-    final token = requestToken;
-    setState(() => loadingMore = true);
-    try {
-      final next = query.isNotEmpty
-          ? await TmdbService().searchPage(query, page: searchPage + 1)
-          : await TmdbService().discoverPage(
-              type: type,
-              genreId: genreId,
-              year: year,
-              minimumRating: minimumRating,
-              sortBy: sortBy,
-              page: searchPage + 1,
-            );
-      if (!mounted || token != requestToken) return;
-      final keys = results.map((item) => item.key).toSet();
-      setState(() {
-        results.addAll(next.items.where((item) => keys.add(item.key)));
-        searchPage = next.page;
-        searchTotalPages = next.totalPages;
-        loadingMore = false;
-      });
-    } catch (_) {
-      if (mounted && token == requestToken) setState(() => loadingMore = false);
-    }
+  void _apply(
+    TabRoute location, {
+    bool immediate = true,
+    bool synchronize = true,
+  }) {
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    setState(
+      () => _setLocation(
+        location,
+        immediate: immediate,
+        synchronize: synchronize,
+      ),
+    );
+    CineNavigation.of(context).updateSearch(context, location);
+  }
+
+  void _search(String text, {bool immediate = false}) {
+    final location = TabRoute(
+      AppTab.search,
+      text: text.trim(),
+      scope: _location.scope,
+    );
+    if (!immediate && location.uri == _location.uri) return;
+    _apply(location, immediate: immediate, synchronize: false);
+  }
+
+  void _markFirstPaint() {
+    final started = _inputWatch;
+    final outcome = _firstOutcome;
+    if (!mounted || started == null || outcome == null) return;
+    _inputWatch = null;
+    context.read<AppPerformance>().record(
+      PerfSample(
+        _location.discovery == null
+            ? PerfEvent.searchResults
+            : PerfEvent.searchDiscovery,
+        started.elapsed,
+        area: PerfArea.search,
+        outcome: outcome,
+      ),
+    );
   }
 
   Future<void> _openFilters() async {
-    var nextType = type;
-    var nextGenre = genreId;
-    var nextYear = year;
-    var nextRating = minimumRating;
-    var nextSort = sortBy;
+    final repository = context.read<CatalogueRepository>();
+    var browse = _location.discovery != null;
+    var scope = _location.scope;
+    DiscoveryQuery filters = _location.discovery ?? defaultDiscovery;
+    Future<List<Genre>>? genres = browse
+        ? repository.genres(filters.kind)
+        : null;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (_, setSheetState) => SafeArea(
+        builder: (_, setSheet) => SafeArea(
           child: SingleChildScrollView(
             padding: EdgeInsets.fromLTRB(
               20,
               20,
               20,
-              MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+              MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1554,127 +1449,236 @@ class _SearchPageState extends State<SearchPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
-                      'Discovery filters',
+                      'Search options',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     TextButton(
-                      onPressed: () => setSheetState(() {
-                        nextType = 'movie';
-                        nextGenre = null;
-                        nextYear = null;
-                        nextRating = null;
-                        nextSort = 'popularity.desc';
+                      onPressed: () => setSheet(() {
+                        scope = SearchScope.all;
+                        filters = defaultDiscovery;
+                        if (browse) genres = repository.genres(filters.kind);
                       }),
                       child: const Text('Reset'),
                     ),
                   ],
                 ),
                 const SizedBox(height: 14),
-                FilterField<String>(
-                  label: 'CONTENT TYPE',
-                  value: nextType,
-                  items: const [
-                    DropdownMenuItem(value: 'movie', child: Text('Movies')),
-                    DropdownMenuItem(value: 'tv', child: Text('TV shows')),
-                  ],
-                  onChanged: (value) =>
-                      setSheetState(() => nextType = value ?? nextType),
-                ),
-                FilterField<int>(
-                  label: 'GENRE',
-                  value: nextGenre,
-                  items: [
-                    const DropdownMenuItem<int>(
-                      value: null,
-                      child: Text('All genres'),
-                    ),
-                    ...genres.entries.map(
-                      (entry) => DropdownMenuItem<int>(
-                        value: entry.key,
-                        child: Text(entry.value),
-                      ),
-                    ),
-                  ],
-                  onChanged: (value) => setSheetState(() => nextGenre = value),
-                ),
-                FilterField<int>(
-                  label: 'RELEASE YEAR',
-                  value: nextYear,
-                  items: [
-                    const DropdownMenuItem<int>(
-                      value: null,
-                      child: Text('Any year'),
-                    ),
-                    ...List.generate(
-                      12,
-                      (index) => DateTime.now().year - index,
-                    ).map(
-                      (value) => DropdownMenuItem<int>(
-                        value: value,
-                        child: Text('$value'),
-                      ),
-                    ),
-                  ],
-                  onChanged: (value) => setSheetState(() => nextYear = value),
-                ),
-                FilterField<double>(
-                  label: 'MINIMUM RATING',
-                  value: nextRating,
-                  items: [
-                    const DropdownMenuItem<double>(
-                      value: null,
-                      child: Text('Any rating'),
-                    ),
-                    ...[6.0, 7.0, 8.0, 9.0].map(
-                      (value) => DropdownMenuItem<double>(
-                        value: value,
-                        child: Text('$value+'),
-                      ),
-                    ),
-                  ],
-                  onChanged: (value) => setSheetState(() => nextRating = value),
-                ),
-                FilterField<String>(
-                  label: 'SORT BY',
-                  value: nextSort,
+                FilterField<bool>(
+                  label: 'MODE',
+                  value: browse,
                   items: const [
                     DropdownMenuItem(
-                      value: 'popularity.desc',
-                      child: Text('Popularity'),
+                      value: false,
+                      child: Text('Search by title'),
                     ),
                     DropdownMenuItem(
-                      value: 'vote_average.desc',
-                      child: Text('Rating'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'primary_release_date.desc',
-                      child: Text('Release date'),
+                      value: true,
+                      child: Text('Browse by filters'),
                     ),
                   ],
-                  onChanged: (value) =>
-                      setSheetState(() => nextSort = value ?? nextSort),
+                  onChanged: (value) => setSheet(() {
+                    browse = value ?? false;
+                    if (browse) genres = repository.genres(filters.kind);
+                  }),
                 ),
+                if (!browse)
+                  FilterField<SearchScope>(
+                    label: 'TITLE SCOPE',
+                    value: scope,
+                    items: const [
+                      DropdownMenuItem(
+                        value: SearchScope.all,
+                        child: Text('All titles'),
+                      ),
+                      DropdownMenuItem(
+                        value: SearchScope.movie,
+                        child: Text('Movies'),
+                      ),
+                      DropdownMenuItem(
+                        value: SearchScope.tv,
+                        child: Text('TV shows'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setSheet(() => scope = value ?? scope),
+                  )
+                else ...[
+                  FilterField<MediaKind>(
+                    label: 'CONTENT TYPE',
+                    value: filters.kind,
+                    items: const [
+                      DropdownMenuItem(
+                        value: MediaKind.movie,
+                        child: Text('Movies'),
+                      ),
+                      DropdownMenuItem(
+                        value: MediaKind.tv,
+                        child: Text('TV shows'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null || value == filters.kind) return;
+                      setSheet(() {
+                        filters = (
+                          kind: value,
+                          genre: null,
+                          year: filters.year,
+                          minimumRating: filters.minimumRating,
+                          sort: filters.sort,
+                        );
+                        genres = repository.genres(value);
+                      });
+                    },
+                  ),
+                  FutureBuilder<List<Genre>>(
+                    future: genres,
+                    builder: (_, snapshot) {
+                      final list =
+                          snapshot.connectionState == ConnectionState.done
+                          ? snapshot.data ?? const <Genre>[]
+                          : const <Genre>[];
+                      final selected = filters.genre;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          FilterField<int>(
+                            label: 'GENRE',
+                            value: selected,
+                            items: [
+                              const DropdownMenuItem(
+                                value: null,
+                                child: Text('All genres'),
+                              ),
+                              if (selected != null &&
+                                  !list.any((item) => item.id == selected))
+                                DropdownMenuItem(
+                                  value: selected,
+                                  child: const Text('Selected genre'),
+                                ),
+                              for (final genre in list)
+                                DropdownMenuItem(
+                                  value: genre.id,
+                                  child: Text(genre.name),
+                                ),
+                            ],
+                            onChanged: (value) => setSheet(
+                              () => filters = (
+                                kind: filters.kind,
+                                genre: value,
+                                year: filters.year,
+                                minimumRating: filters.minimumRating,
+                                sort: filters.sort,
+                              ),
+                            ),
+                          ),
+                          if (snapshot.hasError)
+                            TextButton(
+                              onPressed: () => setSheet(
+                                () => genres = repository.genres(
+                                  filters.kind,
+                                  refresh: true,
+                                ),
+                              ),
+                              child: const Text('Retry loading genres'),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  FilterField<int>(
+                    label: filters.kind == MediaKind.tv
+                        ? 'FIRST AIR YEAR'
+                        : 'RELEASE YEAR',
+                    value: filters.year,
+                    items: [
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text('Any year'),
+                      ),
+                      for (final year in {
+                        ...List.generate(
+                          12,
+                          (index) => DateTime.now().year - index,
+                        ),
+                        if (filters.year != null) filters.year!,
+                      })
+                        DropdownMenuItem(value: year, child: Text('$year')),
+                    ],
+                    onChanged: (value) => setSheet(
+                      () => filters = (
+                        kind: filters.kind,
+                        genre: filters.genre,
+                        year: value,
+                        minimumRating: filters.minimumRating,
+                        sort: filters.sort,
+                      ),
+                    ),
+                  ),
+                  FilterField<double>(
+                    label: 'MINIMUM RATING',
+                    value: filters.minimumRating,
+                    items: [
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text('Any rating'),
+                      ),
+                      for (final value in {
+                        6.0,
+                        7.0,
+                        8.0,
+                        9.0,
+                        if (filters.minimumRating != null)
+                          filters.minimumRating!,
+                      })
+                        DropdownMenuItem(value: value, child: Text('$value+')),
+                    ],
+                    onChanged: (value) => setSheet(
+                      () => filters = (
+                        kind: filters.kind,
+                        genre: filters.genre,
+                        year: filters.year,
+                        minimumRating: value,
+                        sort: filters.sort,
+                      ),
+                    ),
+                  ),
+                  FilterField<CatalogueSort>(
+                    label: 'SORT BY',
+                    value: filters.sort,
+                    items: [
+                      for (final sort in CatalogueSort.values)
+                        DropdownMenuItem(value: sort, child: Text(sort.label)),
+                    ],
+                    onChanged: (value) => setSheet(
+                      () => filters = (
+                        kind: filters.kind,
+                        genre: filters.genre,
+                        year: filters.year,
+                        minimumRating: filters.minimumRating,
+                        sort: value ?? filters.sort,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: () {
-                      setState(() {
-                        type = nextType;
-                        genreId = nextGenre;
-                        year = nextYear;
-                        minimumRating = nextRating;
-                        sortBy = nextSort;
-                      });
+                      final location = TabRoute(
+                        AppTab.search,
+                        text: browse ? '' : _text.text.trim(),
+                        scope: scope,
+                        discovery: browse ? filters : null,
+                      );
                       Navigator.pop(sheetContext);
-                      search(controller.text, immediate: true);
+                      _apply(location);
                     },
-                    child: const Text(
-                      'Apply filters',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                    child: Text(
+                      browse ? 'Apply filters' : 'Apply search scope',
                     ),
                   ),
                 ),
@@ -1687,105 +1691,85 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) => NotificationListener<ScrollNotification>(
-    onNotification: (notification) {
-      if (notification.metrics.pixels >=
-          notification.metrics.maxScrollExtent * .75) {
-        _loadMoreSearch();
-      }
-      return false;
-    },
-    child: ListView(
-      padding: const EdgeInsets.all(20),
-      controller: scrollController,
-      children: [
-        const Text(
-          'Search',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: controller,
-          onChanged: search,
-          onSubmitted: (value) => search(value, immediate: true),
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            hintText: 'Search movies and TV shows',
-            prefixIcon: const Icon(Icons.search),
-            suffixIcon: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  onPressed: _openFilters,
-                  icon: Icon(
-                    genreId != null || year != null || minimumRating != null
-                        ? Icons.filter_alt
-                        : Icons.filter_alt_outlined,
+  void dispose() {
+    _text.dispose();
+    _scroll.dispose();
+    _pages.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filters = _location.discovery;
+    final hint = switch (_location.scope) {
+      SearchScope.all => 'Search movies and TV shows',
+      SearchScope.movie => 'Search movies',
+      SearchScope.tv => 'Search TV shows',
+    };
+    return _PagedViewport(
+      pages: _pages,
+      scroll: _scroll,
+      onFirstPaint: _markFirstPaint,
+      cardWidth: 180,
+      cardHeight: 270,
+      heroPrefix: 'search',
+      idleMessage: 'Search the TMDB catalogue to find your next story.',
+      emptyMessage: filters == null
+          ? 'No matching titles found.'
+          : 'No titles match these discovery filters.',
+      header: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Search',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _text,
+            onChanged: _search,
+            onSubmitted: (value) => _search(value, immediate: true),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: hint,
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Search options',
+                    onPressed: _openFilters,
+                    icon: Icon(
+                      filters == null && _location.scope == SearchScope.all
+                          ? Icons.filter_alt_outlined
+                          : Icons.filter_alt,
+                    ),
                   ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    controller.clear();
-                    search('');
-                  },
-                  icon: const Icon(Icons.close),
-                ),
-              ],
+                  IconButton(
+                    tooltip: 'Clear search',
+                    onPressed: () =>
+                        _apply(TabRoute(AppTab.search, scope: _location.scope)),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 20),
-        if (searching && result == null)
-          const Center(child: CircularProgressIndicator())
-        else if (result == null)
-          const MessageState(
-            message: 'Search the TMDB catalogue to find your next story.',
-          )
-        else
-          FutureBuilder<List<Media>>(
-            future: result,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return MessageState(message: snapshot.error.toString());
-              }
-              if (results.isEmpty) {
-                return const MessageState(message: 'No matching titles found.');
-              }
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: results.length + (loadingMore ? 1 : 0),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 180,
-                  mainAxisExtent: 270,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 18,
-                ),
-                itemBuilder: (_, i) {
-                  if (i == results.length) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    );
-                  }
-                  return MediaCard(
-                    media: results[i],
-                    heroTag: 'search-${results[i].key}',
-                  );
-                },
-              );
-            },
-          ),
-      ],
-    ),
-  );
+          if (filters != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                filters.kind == MediaKind.movie
+                    ? 'Browsing movies'
+                    : 'Browsing TV shows',
+                style: const TextStyle(color: muted),
+              ),
+            ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
 }
 
 class WatchlistPage extends StatefulWidget {
@@ -1815,6 +1799,8 @@ class _WatchlistPageState extends State<WatchlistPage> {
     final notes = TextEditingController(text: item.notes);
     final review = TextEditingController(text: item.review);
     var selectedStatus = item.status;
+    var saving = false;
+    String? writeError;
     double? rating = item.userRating;
     DateTime? watchedDate = item.dateWatched;
     await showModalBottomSheet<void>(
@@ -1847,7 +1833,9 @@ class _WatchlistPageState extends State<WatchlistPage> {
                 const SizedBox(height: 16),
                 DropdownButtonFormField<WatchStatus>(
                   initialValue: selectedStatus,
-                  decoration: const InputDecoration(labelText: 'Viewing status'),
+                  decoration: const InputDecoration(
+                    labelText: 'Viewing status',
+                  ),
                   items: WatchStatus.values
                       .map(
                         (value) => DropdownMenuItem(
@@ -1856,31 +1844,59 @@ class _WatchlistPageState extends State<WatchlistPage> {
                         ),
                       )
                       .toList(),
-                  onChanged: (value) => setSheetState(
-                    () => selectedStatus = value ?? selectedStatus,
-                  ),
+                  onChanged: (value) => setSheetState(() {
+                    if (value == WatchStatus.watched &&
+                        selectedStatus != value) {
+                      watchedDate ??= DateTime.now();
+                    }
+                    selectedStatus = value ?? selectedStatus;
+                  }),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<double?>(
                   initialValue: rating,
-                  decoration: const InputDecoration(labelText: 'Personal rating'),
-                  items: <double?>[
-                    null,
-                    0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0,
-                    if (rating != null &&
-                        !const [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
-                            .contains(rating))
-                      rating,
-                  ]
-                      .map(
-                        (value) => DropdownMenuItem<double?>(
-                          value: value,
-                          child: Text(
-                            value == null ? 'Not rated' : '$value / 5 \u2605',
-                          ),
-                        ),
-                      )
-                      .toList(),
+                  decoration: const InputDecoration(
+                    labelText: 'Personal rating',
+                  ),
+                  items:
+                      <double?>[
+                            null,
+                            0.5,
+                            1.0,
+                            1.5,
+                            2.0,
+                            2.5,
+                            3.0,
+                            3.5,
+                            4.0,
+                            4.5,
+                            5.0,
+                            if (rating != null &&
+                                !const [
+                                  0.5,
+                                  1.0,
+                                  1.5,
+                                  2.0,
+                                  2.5,
+                                  3.0,
+                                  3.5,
+                                  4.0,
+                                  4.5,
+                                  5.0,
+                                ].contains(rating))
+                              rating,
+                          ]
+                          .map(
+                            (value) => DropdownMenuItem<double?>(
+                              value: value,
+                              child: Text(
+                                value == null
+                                    ? 'Not rated'
+                                    : '$value / 5 \u2605',
+                              ),
+                            ),
+                          )
+                          .toList(),
                   onChanged: (value) => setSheetState(() => rating = value),
                 ),
                 const SizedBox(height: 12),
@@ -1893,44 +1909,76 @@ class _WatchlistPageState extends State<WatchlistPage> {
                 TextField(
                   controller: review,
                   maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Personal review'),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final picked = await showDatePicker(
-                      context: sheetContext,
-                      firstDate: DateTime(1900),
-                      lastDate: DateTime.now(),
-                      initialDate: watchedDate ?? DateTime.now(),
-                    );
-                    if (picked != null) {
-                      setSheetState(() => watchedDate = picked);
-                    }
-                  },
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text(
-                    watchedDate == null
-                        ? 'Set date watched'
-                        : 'Watched ${watchedDate!.day}/${watchedDate!.month}/${watchedDate!.year}',
+                  decoration: const InputDecoration(
+                    labelText: 'Personal review',
                   ),
                 ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: sheetContext,
+                          firstDate: DateTime(1900),
+                          lastDate: DateTime.now(),
+                          initialDate: watchedDate ?? DateTime.now(),
+                        );
+                        if (picked != null && sheetContext.mounted) {
+                          setSheetState(() => watchedDate = picked);
+                        }
+                      },
+                      icon: const Icon(Icons.event_outlined),
+                      label: Text(
+                        watchedDate == null
+                            ? 'Set date watched'
+                            : 'Watched ${watchedDate!.day}/${watchedDate!.month}/${watchedDate!.year}',
+                      ),
+                    ),
+                    if (watchedDate != null)
+                      IconButton(
+                        tooltip: 'Clear watched date',
+                        onPressed: () =>
+                            setSheetState(() => watchedDate = null),
+                        icon: const Icon(Icons.clear),
+                      ),
+                  ],
+                ),
+                if (writeError != null) MessageState(message: writeError!),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: () async {
-                      await provider.update(
-                        item,
-                        status: selectedStatus,
-                        userRating: rating,
-                        notes: notes.text.trim(),
-                        review: review.text.trim(),
-                        dateWatched: watchedDate,
-                      );
-                      if (sheetContext.mounted) Navigator.pop(sheetContext);
-                    },
-                    child: const Text('Save changes'),
+                    onPressed: saving
+                        ? null
+                        : () async {
+                            final edit = (
+                              status: selectedStatus,
+                              rating: rating,
+                              notes: notes.text.trim(),
+                              review: review.text.trim(),
+                              watchedDate: watchedDate,
+                            );
+                            setSheetState(() {
+                              saving = true;
+                              writeError = null;
+                            });
+                            try {
+                              await provider.update(item, edit);
+                              if (sheetContext.mounted) {
+                                Navigator.pop(sheetContext);
+                              }
+                            } catch (_) {
+                              if (!sheetContext.mounted) return;
+                              setSheetState(() {
+                                saving = false;
+                                writeError = 'Unable to save changes. Your previous entry is still available.';
+                              });
+                            }
+                          },
+                    child: Text(saving ? 'Saving…' : 'Save changes'),
                   ),
                 ),
               ],
@@ -1946,6 +1994,7 @@ class _WatchlistPageState extends State<WatchlistPage> {
   @override
   Widget build(BuildContext context) => Consumer<WatchlistProvider>(
     builder: (_, provider, _) {
+      if (!provider.initialized) return _libraryState(provider);
       final query = searchController.text.trim().toLowerCase();
       final visible =
           provider.items.where((item) {
@@ -1981,6 +2030,7 @@ class _WatchlistPageState extends State<WatchlistPage> {
               hintText: 'Search your collection',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: IconButton(
+                tooltip: 'Clear watchlist search',
                 onPressed: () {
                   searchController.clear();
                   setState(() {});
@@ -2043,28 +2093,8 @@ class _WatchlistPageState extends State<WatchlistPage> {
                   onTap: () => _edit(context, item),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline),
-                    onPressed: () async {
-                      final confirmed = await showDialog<bool>(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text('Remove title?'),
-                          content: Text(
-                            'Remove ${item.title} from your watchlist?',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('Remove'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirmed == true) await provider.remove(item);
-                    },
+                    tooltip: 'Remove ${item.title}',
+                    onPressed: () => _remove(context, item),
                   ),
                 ),
               ),
@@ -2080,6 +2110,7 @@ class StatisticsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Consumer<WatchlistProvider>(
     builder: (_, provider, _) {
+      if (!provider.initialized) return _libraryState(provider);
       final counts = provider.statusCounts;
       return ListView(
         padding: const EdgeInsets.all(20),
@@ -2152,6 +2183,11 @@ class StatisticsPage extends StatelessWidget {
             ),
             ActivitySummary(provider: provider),
             Achievements(provider: provider),
+            if (provider.achievementsNeedRetry)
+              MessageState(
+                message: 'Some achievements could not be updated.',
+                onRetry: provider.initialize,
+              ),
           ],
         ],
       );
@@ -2159,174 +2195,285 @@ class StatisticsPage extends StatelessWidget {
   );
 }
 
-class MediaDetailsPage extends StatelessWidget {
-  const MediaDetailsPage({required this.media, this.heroTag, super.key});
-  final Media media;
+class MediaDetailsPage extends StatefulWidget {
+  const MediaDetailsPage({
+    required this.ref,
+    this.summary,
+    this.heroTag,
+    super.key,
+  });
+
+  final EntityRef ref;
+  final Media? summary;
   final String? heroTag;
+
+  @override
+  State<MediaDetailsPage> createState() => _MediaDetailsPageState();
+}
+
+class _MediaDetailsPageState extends State<MediaDetailsPage> {
+  late final _repository = context.read<CatalogueRepository>();
+  late Future<Media> _details;
+  Media? _lastGood;
+
+  @override
+  void initState() {
+    super.initState();
+    _details = _request();
+  }
+
+  Future<Media> _request({bool refresh = false}) async =>
+      _lastGood = await _repository.details(widget.ref, refresh: refresh);
+
+  void _refresh() => setState(() => _details = _request(refresh: true));
+
   @override
   Widget build(BuildContext context) => FutureBuilder<Media>(
-    future: TmdbService().details(media),
-    initialData: media,
+    future: _details,
+    initialData: widget.summary,
     builder: (context, snapshot) {
-      final item = snapshot.data ?? media;
+      final item = snapshot.data ?? _lastGood ?? widget.summary;
       return Scaffold(
         appBar: AppBar(
-          title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          title: Text(
+            item?.title ?? 'Title details',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          leading: BackButton(
+            onPressed: () => CineNavigation.of(context).back(context),
+          ),
         ),
-        body: ListView(
-          children: [
-            if (item.backdropPath != null)
-              Image.network(
-                '${TmdbService.backdropBase}${item.backdropPath}',
-                height: 220,
-                fit: BoxFit.cover,
-              ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        body: item == null
+            ? snapshot.hasError
+                  ? Center(
+                      child: MessageState(
+                        message: _catalogueMessage(snapshot.error),
+                        onRetry: _refresh,
+                      ),
+                    )
+                  : const Center(child: CircularProgressIndicator())
+            : ListView(
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      heroTag == null
-                          ? Poster(
-                              path: item.posterPath,
-                              width: 112,
-                              height: 168,
-                            )
-                          : Hero(
-                              tag: heroTag!,
-                              child: Poster(
-                                path: item.posterPath,
-                                width: 112,
-                                height: 168,
-                              ),
-                            ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
+                  if (item.backdropPath != null)
+                    Image.network(
+                      '${CatalogueRepository.backdropBase}${item.backdropPath}',
+                      height: 220,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const SizedBox(height: 220),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              item.title,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              '${item.year}  \u00B7  ${item.rating.toStringAsFixed(1)} \u2605',
-                              style: const TextStyle(color: gold),
-                            ),
-                            const SizedBox(height: 12),
-                            Consumer<WatchlistProvider>(
-                              builder: (_, provider, _) {
-                                final saved =
-                                    provider.find(item.id, item.type) != null;
-                                return FilledButton.icon(
-                                  onPressed: () => saved
-                                      ? provider.remove(
-                                          provider.find(item.id, item.type)!,
-                                        )
-                                      : _save(context, item),
-                                  icon: AnimatedSwitcher(
-                                    duration: const Duration(milliseconds: 220),
-                                    transitionBuilder: (child, animation) =>
-                                        ScaleTransition(
-                                          scale: animation,
-                                          child: child,
-                                        ),
-                                    child: Icon(
-                                      saved
-                                          ? Icons.bookmark
-                                          : Icons.bookmark_add_outlined,
-                                      key: ValueKey(saved),
+                            widget.heroTag == null
+                                ? Poster(
+                                    path: item.posterPath,
+                                    width: 112,
+                                    height: 168,
+                                  )
+                                : Hero(
+                                    tag: widget.heroTag!,
+                                    child: Poster(
+                                      path: item.posterPath,
+                                      width: 112,
+                                      height: 168,
                                     ),
                                   ),
-                                  label: Text(
-                                    saved
-                                        ? 'Remove from watchlist'
-                                        : 'Add to watchlist',
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.title,
+                                    style: const TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
-                                );
-                              },
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    '${item.year}  \u00B7  ${item.rating.toStringAsFixed(1)} \u2605',
+                                    style: const TextStyle(color: gold),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Consumer<WatchlistProvider>(
+                                    builder: (_, provider, _) {
+                                      final saved =
+                                          provider.find(item.id, item.type) !=
+                                          null;
+                                      return FilledButton.icon(
+                                        onPressed: !provider.initialized
+                                            ? null
+                                            : () => saved
+                                                  ? _remove(
+                                                      context,
+                                                      provider.find(
+                                                        item.id,
+                                                        item.type,
+                                                      )!,
+                                                    )
+                                                  : _save(context, item),
+                                        icon: AnimatedSwitcher(
+                                          duration: const Duration(
+                                            milliseconds: 220,
+                                          ),
+                                          transitionBuilder:
+                                              (child, animation) =>
+                                                  ScaleTransition(
+                                                    scale: animation,
+                                                    child: child,
+                                                  ),
+                                          child: Icon(
+                                            saved
+                                                ? Icons.bookmark
+                                                : Icons.bookmark_add_outlined,
+                                            key: ValueKey(saved),
+                                          ),
+                                        ),
+                                        label: Text(
+                                          saved
+                                              ? 'Remove from watchlist'
+                                              : 'Add to watchlist',
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  if (item.genres.isNotEmpty)
-                    Wrap(
-                      spacing: 8,
-                      children: item.genres
-                          .map((genre) => Chip(label: Text(genre)))
-                          .toList(),
-                    ),
-                  const SizedBox(height: 18),
-                  const Text(
-                    'Overview',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    item.overview.isEmpty
-                        ? 'No overview available.'
-                        : item.overview,
-                    style: const TextStyle(color: muted, height: 1.5),
-                  ),
-                  const SizedBox(height: 22),
-                  if (item.isMovie)
-                    Text(
-                      'Runtime: ${item.runtime == null ? 'Not available' : '${item.runtime} minutes'}',
-                      style: const TextStyle(color: muted),
-                    )
-                  else
-                    Text(
-                      'Seasons: ${item.seasons ?? 'N/A'}  \u00B7  Episodes: ${item.episodes ?? 'N/A'}  \u00B7  Episode runtime: ${item.episodeRuntime == null ? 'N/A' : '${item.episodeRuntime} min'}',
-                      style: const TextStyle(color: muted),
-                    ),
-                  const SizedBox(height: 28),
-                  RelatedSection(
-                    title: 'Similar ${item.isMovie ? 'movies' : 'TV shows'}',
-                    loader: TmdbService().similar(item),
-                    onTap: (related) => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MediaDetailsPage(media: related),
-                      ),
+                        const SizedBox(height: 24),
+                        if (item.genres.isNotEmpty)
+                          Wrap(
+                            spacing: 8,
+                            children: item.genres
+                                .map((genre) => Chip(label: Text(genre)))
+                                .toList(),
+                          ),
+                        const SizedBox(height: 18),
+                        const Text(
+                          'Overview',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          item.overview.isEmpty
+                              ? 'No overview available.'
+                              : item.overview,
+                          style: const TextStyle(color: muted, height: 1.5),
+                        ),
+                        const SizedBox(height: 22),
+                        if (item.isMovie)
+                          Text(
+                            'Runtime: ${item.runtime == null ? 'Not available' : '${item.runtime} minutes'}',
+                            style: const TextStyle(color: muted),
+                          )
+                        else
+                          Text(
+                            'Seasons: ${item.seasons ?? 'N/A'}  \u00B7  Episodes: ${item.episodes ?? 'N/A'}  \u00B7  Episode runtime: ${item.episodeRuntime == null ? 'N/A' : '${item.episodeRuntime} min'}',
+                            style: const TextStyle(color: muted),
+                          ),
+                        const SizedBox(height: 28),
+                      ],
                     ),
                   ),
-                  RelatedSection(
-                    title: 'Recommended',
-                    loader: TmdbService().recommendations(item),
-                    onTap: (related) => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MediaDetailsPage(media: related),
-                      ),
+                  if (snapshot.hasError)
+                    MessageState(
+                      message: _catalogueMessage(snapshot.error),
+                      onRetry: _refresh,
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: RelatedSection(
+                      title: 'Similar ${item.isMovie ? 'movies' : 'TV shows'}',
+                      ref: widget.ref,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: RelatedSection(
+                      title: 'Recommended',
+                      ref: widget.ref,
+                      recommended: true,
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
       );
     },
   );
 }
 
+Widget _libraryState(WatchlistProvider provider) => Center(
+  child: provider.openFailed
+      ? MessageState(
+          message: 'Unable to open your local watchlist.',
+          onRetry: provider.initialize,
+        )
+      : const CircularProgressIndicator(),
+);
+
 Future<void> _save(BuildContext context, Media media) async {
-  await context.read<WatchlistProvider>().save(media);
-  if (context.mounted) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Added to your watchlist')));
+  final provider = context.read<WatchlistProvider>();
+  if (!provider.initialized) {
+    _libraryMessage(
+      context,
+      'Your watchlist is unavailable. Open Watchlist to retry.',
+    );
+    return;
+  }
+  try {
+    await provider.save(media);
+    if (context.mounted) _libraryMessage(context, 'Added to your watchlist');
+  } catch (_) {
+    if (context.mounted) {
+      _libraryMessage(context, 'Unable to save this title. Please retry.');
+    }
   }
 }
+
+Future<void> _remove(BuildContext context, WatchlistItem item) async {
+  final provider = context.read<WatchlistProvider>();
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Remove title?'),
+      content: Text('Remove ${item.title} from your watchlist?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text('Remove'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  try {
+    await provider.remove(item);
+  } catch (_) {
+    if (context.mounted) {
+      _libraryMessage(context, 'Unable to remove this title. Please retry.');
+    }
+  }
+}
+
+void _libraryMessage(BuildContext context, String message) =>
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
 
 class MediaCard extends StatelessWidget {
   const MediaCard({required this.media, this.heroTag, super.key});
@@ -2334,11 +2481,8 @@ class MediaCard extends StatelessWidget {
   final String? heroTag;
   @override
   Widget build(BuildContext context) => GestureDetector(
-    onTap: () => Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MediaDetailsPage(media: media, heroTag: heroTag),
-      ),
-    ),
+    onTap: () =>
+        CineNavigation.of(context).openTitle(context, media, heroTag: heroTag),
     child: SizedBox(
       width: 145,
       child: Column(
@@ -2369,68 +2513,103 @@ class MediaCard extends StatelessWidget {
   );
 }
 
-class RelatedSection extends StatelessWidget {
+class RelatedSection extends StatefulWidget {
   const RelatedSection({
     required this.title,
-    required this.loader,
-    required this.onTap,
+    required this.ref,
+    this.recommended = false,
     super.key,
   });
   final String title;
-  final Future<List<Media>> loader;
-  final ValueChanged<Media> onTap;
+  final EntityRef ref;
+  final bool recommended;
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<List<Media>>(
-    future: loader,
-    builder: (_, snapshot) {
-      final items = snapshot.data?.take(8).toList() ?? [];
-      if (snapshot.connectionState == ConnectionState.waiting) {
-        return const Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: LinearProgressIndicator(),
-        );
-      }
-      if (items.isEmpty) return const SizedBox.shrink();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 220,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 12),
-              itemBuilder: (_, index) => GestureDetector(
-                onTap: () => onTap(items[index]),
-                child: SizedBox(
-                  width: 132,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: Poster(path: items[index].posterPath)),
-                      const SizedBox(height: 6),
-                      Text(
-                        items[index].title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+  State<RelatedSection> createState() => _RelatedSectionState();
+}
+
+class _RelatedSectionState extends State<RelatedSection>
+    with AutomaticKeepAliveClientMixin {
+  late final _repository = context.read<CatalogueRepository>();
+  late Future<List<Media>> loader;
+
+  @override
+  void initState() {
+    super.initState();
+    loader = _request();
+  }
+
+  Future<List<Media>> _request({bool refresh = false}) => _repository.related(
+    widget.ref,
+    recommended: widget.recommended,
+    refresh: refresh,
+  );
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return FutureBuilder<List<Media>>(
+      future: loader,
+      builder: (_, snapshot) {
+        final items = snapshot.data?.take(8).toList() ?? [];
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: LinearProgressIndicator(),
+          );
+        }
+        if (snapshot.hasError) {
+          return MessageState(
+            message: '${widget.title}: ${_catalogueMessage(snapshot.error)}',
+            onRetry: () => setState(() => loader = _request(refresh: true)),
+          );
+        }
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 220,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
+                itemBuilder: (_, index) => GestureDetector(
+                  onTap: () =>
+                      CineNavigation.of(context)
+                          .openTitle(context, items[index]),
+                  child: SizedBox(
+                    width: 132,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: Poster(path: items[index].posterPath)),
+                        const SizedBox(height: 6),
+                        Text(
+                          items[index].title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 20),
-        ],
-      );
-    },
-  );
+            const SizedBox(height: 20),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class Poster extends StatelessWidget {
@@ -2475,7 +2654,7 @@ class _FadeInPosterState extends State<FadeInPoster>
   Widget build(BuildContext context) => FadeTransition(
     opacity: CurvedAnimation(parent: controller, curve: Curves.easeOut),
     child: Image.network(
-      '${TmdbService.imageBase}${widget.path}',
+      '${CatalogueRepository.imageBase}${widget.path}',
       fit: BoxFit.cover,
       errorBuilder: (_, _, _) =>
           const Icon(Icons.broken_image_outlined, color: muted),
