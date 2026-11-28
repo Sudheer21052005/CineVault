@@ -6,6 +6,8 @@ class CineNavigation extends InheritedWidget {
   const CineNavigation({
     required this.open,
     required this.select,
+    required this.selectDestination,
+    required this.openSearch,
     required this.updateSearch,
     required this.replace,
     required this.back,
@@ -19,17 +21,20 @@ class CineNavigation extends InheritedWidget {
     CineRoute, {
     Media? summary,
     String? heroTag,
+    String? artwork,
     String? label,
   })
   open;
   final void Function(BuildContext, AppTab) select;
+  final void Function(BuildContext, AppTab) selectDestination;
+  final void Function(BuildContext) openSearch;
   final void Function(BuildContext, TabRoute) updateSearch;
   final void Function(BuildContext, CineRoute) replace;
   final void Function(BuildContext) back;
   final ValueNotifier<int> searchRequests;
 
   void focusSearch(BuildContext context) {
-    select(context, AppTab.search);
+    openSearch(context);
     // The first search screen mounts when the route change is drawn.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (context.mounted) searchRequests.value++;

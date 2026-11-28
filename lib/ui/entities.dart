@@ -18,7 +18,14 @@ import 'media_sections.dart';
 import 'personal_actions.dart';
 
 class PersonPage extends StatelessWidget {
-  const PersonPage({required this.ref, super.key});
+  const PersonPage({
+    required this.ref,
+    this.heroTag,
+    this.portrait,
+    this.previewName,
+    super.key,
+  });
+  final String? heroTag, portrait, previewName;
   final EntityRef ref;
 
   @override
@@ -26,6 +33,24 @@ class PersonPage extends StatelessWidget {
     final repository = context.read<CatalogueRepository>();
     return GraphLoad<Json>(
       fullPage: true,
+      loading: portrait == null
+          ? null
+          : (_) => CinePage(
+              slivers: [
+                CineSliver(
+                  top: 23,
+                  bottom: 17,
+                  child: GraphHeader(
+                    title: previewName ?? 'Person',
+                    category: 'Person',
+                    image: portrait,
+                    artKind: ArtworkKind.profile,
+                    heroTag: heroTag,
+                  ),
+                ),
+                const CineSliver(child: CineSkeleton(height: 94)),
+              ],
+            ),
       load: ({required refresh}) => repository.entity(ref, refresh: refresh),
       builder: (context, person) {
         final name = text(person['name']) ?? 'Person';
@@ -38,11 +63,13 @@ class PersonPage extends StatelessWidget {
               child: GraphHeader(
                 title: name,
                 category: 'Person',
-                image: text(person['profile_path']),
+                image: text(person['profile_path']) ?? portrait,
                 artKind: ArtworkKind.profile,
+                heroTag: heroTag,
                 subtitle: text(person['known_for_department']),
                 actions: [
                   PersonalActions(
+                    compact: CineLayout.widthOf(context) == CineWidth.compact,
                     title: PersonalTitle(
                       TitleRoute(ref),
                       name,
@@ -130,22 +157,18 @@ class PersonPage extends StatelessWidget {
             ),
             CineSliver(
               bottom: 10,
-              child: GraphSection(
-                key: const PageStorageKey('person-images'),
-                title: 'Photographs',
-                icon: Icons.photo_library_outlined,
-                builder: (_) => GraphLoad<Json>(
-                  load: ({required refresh}) => repository.section(
-                    ref,
-                    KnowledgeSection.images,
-                    refresh: refresh,
-                  ),
-                  builder: (_, data) => Gallery(
-                    data: data,
-                    groups: const [
-                      ('profiles', 'Photographs', ArtworkKind.profile),
-                    ],
-                  ),
+              child: GraphLoad<Json>(
+                load: ({required refresh}) => repository.section(
+                  ref,
+                  KnowledgeSection.images,
+                  refresh: refresh,
+                ),
+                builder: (_, data) => Gallery(
+                  title: name,
+                  data: data,
+                  groups: const [
+                    ('profiles', 'Photographs', ArtworkKind.profile),
+                  ],
                 ),
               ),
             ),

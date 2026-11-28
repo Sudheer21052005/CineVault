@@ -9,6 +9,7 @@ import '../catalogue/knowledge_models.dart';
 import '../core/material.dart';
 import '../library/personal_library.dart';
 import '../library/personal_models.dart';
+import 'design_system.dart';
 
 Future<void> personalWrite(BuildContext context, Future<void> task) async {
   try {
@@ -23,9 +24,15 @@ Future<void> personalWrite(BuildContext context, Future<void> task) async {
 }
 
 class PersonalActions extends StatefulWidget {
-  const PersonalActions({required this.title, this.details, super.key});
+  const PersonalActions({
+    required this.title,
+    this.details,
+    this.compact = false,
+    super.key,
+  });
   final PersonalTitle title;
   final TitleKnowledge? details;
+  final bool compact;
   @override
   State<PersonalActions> createState() => _PersonalActionsState();
 }
@@ -42,7 +49,9 @@ class _PersonalActionsState extends State<PersonalActions> {
     if (!_recorded && library.ready) {
       _recorded = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        if (mounted &&
+            TickerMode.valuesOf(context).enabled &&
+            ModalRoute.of(context)?.isCurrent == true) {
           unawaited(library.recordVisit(title).catchError((Object _) {}));
         }
       });
@@ -51,12 +60,58 @@ class _PersonalActionsState extends State<PersonalActions> {
     final favored = library.state.favorites.containsKey(title.key);
     final hidden = library.state.hidden.containsKey(title.key);
     final route = title.route;
+    if (widget.compact && route is TitleRoute) {
+      final movie = route.ref.kind == EntityKind.movie;
+      final tv = route.ref.kind == EntityKind.tv;
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          _quick(
+            favored ? 'Favorited' : 'Favorite',
+            favored ? Icons.favorite : Icons.favorite_border,
+            () => personalWrite(context, library.favorite(title)),
+          ),
+          _quick(
+            'Add to list',
+            Icons.playlist_add,
+            () => personalListsDialog(context, library, title),
+          ),
+          if (movie)
+            _quick(
+              'Log viewing',
+              Icons.edit_calendar_outlined,
+              () => showViewingEditor(
+                context,
+                library,
+                title,
+                repo: context.read<CatalogueRepository>(),
+              ),
+            ),
+          if (tv && widget.details != null)
+            _quick(
+              _tracking ? 'Loading schedule…' : 'Track series',
+              Icons.playlist_play,
+              _tracking ? null : () => _track(library, widget.details!),
+            ),
+          if (movie || tv)
+            _quick(
+              hidden ? 'Show in recommendations' : 'Hide from recommendations',
+              hidden
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              () =>
+                  personalWrite(context, library.hide(title, hidden: !hidden)),
+            ),
+        ],
+      );
+    }
     return Wrap(
       spacing: 8,
       runSpacing: 7,
       children: [
         OutlinedButton.icon(
-          icon: Icon(
+          icon: CineStateIcon(
             favored ? Icons.favorite : Icons.favorite_border,
             size: 17,
           ),
@@ -102,6 +157,19 @@ class _PersonalActionsState extends State<PersonalActions> {
       ],
     );
   }
+
+  Widget _quick(String label, IconData icon, VoidCallback? action) =>
+      IconButton(
+        tooltip: label,
+        onPressed: action,
+        icon: CineStateIcon(icon, size: 19),
+        style: IconButton.styleFrom(
+          side: const BorderSide(color: outline),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(11),
+          ),
+        ),
+      );
 
   Future<void> _track(PersonalLibrary library, TitleKnowledge detail) async {
     final repo = context.read<CatalogueRepository>();

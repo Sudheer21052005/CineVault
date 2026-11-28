@@ -93,7 +93,7 @@ class ResponsiveShell extends StatelessWidget {
         autofocus: true,
         skipTraversal: true,
         child: Scaffold(
-          bottomNavigationBar: mobile && !covered
+          bottomNavigationBar: mobile
               ? KeyedSubtree(
                   key: const ValueKey('mobile-bottom-nav'),
                   child: _BottomBar(active: tab),
@@ -131,7 +131,7 @@ class ResponsiveShell extends StatelessWidget {
                       child: MediaQuery.removePadding(
                         context: context,
                         removeTop: !covered || !mobile,
-                        removeBottom: mobile && !covered,
+                        removeBottom: mobile,
                         // Navigator route barriers must not hide the persistent
                         // navigation controls from the accessibility tree.
                         child: Semantics(
@@ -201,12 +201,6 @@ String _section(AppTab tab) => switch (tab) {
   AppTab.search => 'Search',
   AppTab.watchlist => 'Library / Watchlist',
   AppTab.stats => 'Library / Statistics',
-};
-
-AppTab _group(AppTab tab) => switch (tab) {
-  AppTab.movies || AppTab.tv || AppTab.nowPlaying => AppTab.discover,
-  AppTab.stats => AppTab.watchlist,
-  _ => tab,
 };
 
 void _select(BuildContext context, AppTab tab) {
@@ -539,7 +533,10 @@ class _BottomBar extends StatelessWidget {
           children: [
             for (final tab in [_home, _discover, _search, _library])
               Expanded(
-                child: _BottomItem(tab: tab, active: _group(active) == tab.tab),
+                child: _BottomItem(
+                  tab: tab,
+                  active: active.destination == tab.tab,
+                ),
               ),
           ],
         ),
@@ -558,38 +555,47 @@ class _BottomItem extends StatelessWidget {
     selected: active,
     button: true,
     label: tab.label,
-    onTap: () => _select(context, tab.tab),
+    onTap: () => CineNavigation.of(context).selectDestination(context, tab.tab),
     excludeSemantics: true,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Material(
-        borderRadius: BorderRadius.circular(12),
-        color: active ? const Color(0xFF192E50) : Colors.transparent,
-        child: InkWell(
+      child: AnimatedContainer(
+        duration: cineMotion(context),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => _select(context, tab.tab),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(tab.icon, size: 23, color: active ? blue : muted),
-                const SizedBox(height: 3),
-                SizedBox(
-                  height: 15,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      tab.label,
-                      style: TextStyle(
-                        color: active ? ink : muted,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
+          color: active ? const Color(0xFF233653) : Colors.transparent,
+        ),
+        child: Material(
+          borderRadius: BorderRadius.circular(12),
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () =>
+                CineNavigation.of(context).selectDestination(context, tab.tab),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(tab.icon, size: 23, color: active ? blue : muted),
+                  const SizedBox(height: 3),
+                  SizedBox(
+                    height: 15,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        tab.label,
+                        style: TextStyle(
+                          color: active ? ink : muted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

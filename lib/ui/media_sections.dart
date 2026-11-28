@@ -1,5 +1,6 @@
 import 'package:provider/provider.dart';
 
+import '../app/navigation_scope.dart';
 import '../app/route_contract.dart';
 import '../catalogue/artwork_policy.dart';
 import '../catalogue/catalogue_repository.dart';
@@ -8,9 +9,12 @@ import '../catalogue/knowledge_models.dart';
 import '../core/material.dart';
 import '../models/media.dart';
 import 'artwork.dart';
+import 'artwork_gallery.dart';
 import 'catalogue_widgets.dart';
 import 'design_system.dart';
 import 'graph_widgets.dart';
+
+export 'artwork_gallery.dart' show Gallery;
 
 String? joined(Iterable<String> values, {String separator = ', '}) =>
     values.isEmpty ? null : values.join(separator);
@@ -123,379 +127,341 @@ class SourceLinks extends StatelessWidget {
   }
 }
 
-class Gallery extends StatelessWidget {
-  const Gallery({required this.data, required this.groups, super.key});
-  final Json data;
-  final List<(String, String, ArtworkKind)> groups;
+enum TitleSection {
+  overview('Overview'),
+  credits('Cast & crew'),
+  seasons('Seasons'),
+  related('Related'),
+  media('Media'),
+  details('Details'),
+  reviews('Reviews');
 
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      for (final (field, label, kind) in groups)
-        _GalleryGroup(
-          key: ValueKey(field),
-          label: label,
-          kind: kind,
-          source: data[field],
-        ),
-    ],
-  );
-}
-
-class _GalleryGroup extends StatefulWidget {
-  const _GalleryGroup({
-    required this.label,
-    required this.kind,
-    required this.source,
-    super.key,
-  });
+  const TitleSection(this.label);
   final String label;
-  final ArtworkKind kind;
-  final Object? source;
-
-  @override
-  State<_GalleryGroup> createState() => _GalleryGroupState();
 }
 
-class _GalleryGroupState extends State<_GalleryGroup> {
-  static const _pageSize = 8;
-  int _page = 0;
+List<WidgetBuilder> titleSectionBlocks(
+  TitleKnowledge knowledge,
+  TitleSection section,
+) {
+  final media = knowledge.media;
+  final ref = media.ref;
+  final data = knowledge.data;
 
-  void _preview(String path, int position, int total) => showDialog<void>(
-    context: context,
-    builder: (context) => Dialog(
-      child: SizedBox(
-        width: 850,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text('${widget.label} · $position of $total'),
-              trailing: const CloseButton(),
-            ),
-            Flexible(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                child: AspectRatio(
-                  aspectRatio:
-                      widget.kind == ArtworkKind.backdrop ||
-                          widget.kind == ArtworkKind.still
-                      ? 16 / 9
-                      : 2 / 3,
-                  child: CineArt(path: path, kind: widget.kind),
-                ),
-              ),
-            ),
-          ],
+  WidgetBuilder remote(
+    KnowledgeSection field,
+    String label,
+    GraphBuilder<Json> build,
+  ) =>
+      (context) => _SectionGroup(
+        label,
+        child: GraphLoad<Json>(
+          load: ({required refresh}) => context
+              .read<CatalogueRepository>()
+              .section(ref, field, refresh: refresh),
+          builder: build,
         ),
-      ),
+      );
+
+  WidgetBuilder related(bool recommended) =>
+      (context) => GraphLoad<List<Media>>(
+        load: ({required refresh}) => context
+            .read<CatalogueRepository>()
+            .related(ref, recommended: recommended, refresh: refresh),
+        builder: (_, items) {
+          final label = recommended
+              ? 'Recommended titles'
+              : media.isMovie
+              ? 'Similar movies'
+              : 'Similar TV shows';
+          return items.isEmpty
+              ? _SectionGroup(
+                  label,
+                  child: const GraphMessage(
+                    'TMDB lists no related titles here.',
+                  ),
+                )
+              : PosterShelf(
+                  title: label,
+                  shelfId: '${ref.id}-${section.name}-$recommended',
+                  items: items,
+                );
+        },
+      );
+
+  final availability = remote(
+    KnowledgeSection.providers,
+    'Where to watch',
+    (_, result) => WatchAvailability(result: result),
+  );
+  Widget connections(BuildContext _) => _SectionGroup(
+    'Explore connections',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (knowledge.collection case final collection?)
+          _LinkGroup('Collection', [collection]),
+        if (knowledge.creators.isNotEmpty)
+          _LinkGroup('Created by', knowledge.creators),
+        if (knowledge.companies.isNotEmpty)
+          _LinkGroup('Production companies', knowledge.companies),
+        if (knowledge.networks.isNotEmpty)
+          _LinkGroup('TV networks', knowledge.networks),
+        if (knowledge.keywords case final keywords?)
+          _LinkGroup('Keywords', keywords)
+        else
+          const GraphMessage('Keyword metadata is unavailable.'),
+      ],
     ),
   );
 
-  @override
-  Widget build(BuildContext context) {
-    final images = [
-      for (final entry in objects(widget.source)) ?text(entry['file_path']),
-    ];
-    if (widget.source is! List) {
-      return GraphMessage('${widget.label} metadata is unavailable.');
-    }
-    if (images.isEmpty) {
-      return GraphMessage('TMDB lists no ${widget.label.toLowerCase()}.');
-    }
-    final start = _page * _pageSize;
-    final layout = CineLayout.widthOf(context);
-    final wide =
-        widget.kind == ArtworkKind.backdrop || widget.kind == ArtworkKind.still;
-    final width = wide
-        ? (layout == CineWidth.compact ? 108.0 : 168.0)
-        : (layout == CineWidth.compact ? 83.0 : 102.0);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${widget.label} · ${images.length}',
-            style: cineLabel(size: 14, color: ink),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 7,
-            runSpacing: 7,
-            children: [
-              for (final (index, path)
-                  in images.skip(start).take(_pageSize).indexed)
-                SizedBox(
-                  width: width,
-                  height: width * (wide ? 9 / 16 : 1.45),
-                  child: Material(
-                    borderRadius: BorderRadius.circular(7),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: () =>
-                          _preview(path, start + index + 1, images.length),
-                      child: Semantics(
-                        label:
-                            'View ${widget.label.toLowerCase()} ${start + index + 1}',
-                        button: true,
-                        child: CineArt(path: path, kind: widget.kind),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          if (images.length > _pageSize)
-            Wrap(
-              spacing: 6,
-              children: [
-                TextButton(
-                  onPressed: _page == 0 ? null : () => setState(() => _page--),
-                  child: const Text('Previous images'),
-                ),
-                TextButton(
-                  onPressed: start + _pageSize >= images.length
-                      ? null
-                      : () => setState(() => _page++),
-                  child: const Text('Next images'),
-                ),
-              ],
-            ),
-        ],
+  return switch (section) {
+    TitleSection.overview => [
+      (context) => GraphLoad<Json>(
+        load: ({required refresh}) => context
+            .read<CatalogueRepository>()
+            .section(ref, KnowledgeSection.credits, refresh: refresh),
+        builder: (_, result) => _CreditSpotlight(
+          knowledge: knowledge,
+          people: readCredits(result['cast'], result['crew']),
+        ),
       ),
-    );
-  }
+      if (!media.isMovie) (_) => _SeasonSections(knowledge, compactList: true),
+      availability,
+      related(true),
+      related(false),
+    ],
+    TitleSection.credits => [
+      remote(
+        KnowledgeSection.credits,
+        'Full credits',
+        (_, result) =>
+            CreditPeople(people: readCredits(result['cast'], result['crew'])),
+      ),
+    ],
+    TitleSection.seasons => [(_) => _SeasonSections(knowledge)],
+    TitleSection.related => [related(true), related(false), connections],
+    TitleSection.media => [
+      remote(
+        KnowledgeSection.images,
+        'Artwork',
+        (_, result) => Gallery(
+          title: media.title,
+          data: result,
+          groups: const [
+            ('backdrops', 'Backdrops', ArtworkKind.backdrop),
+            ('posters', 'Posters', ArtworkKind.poster),
+          ],
+        ),
+      ),
+      remote(
+        KnowledgeSection.videos,
+        'Trailers & videos',
+        (_, result) => _Videos(data: result),
+      ),
+    ],
+    TitleSection.details => [
+      connections,
+      remote(
+        media.isMovie ? KnowledgeSection.releases : KnowledgeSection.ratings,
+        media.isMovie
+            ? 'Release dates & certifications'
+            : 'Regional content ratings',
+        (_, result) => _RegionalReleases(result: result, movie: media.isMovie),
+      ),
+      remote(
+        KnowledgeSection.alternateTitles,
+        'Alternate titles',
+        (_, result) => _AlternateTitles(data: result),
+      ),
+      remote(
+        KnowledgeSection.translations,
+        'Localized titles & summaries',
+        (_, result) => _Translations(data: result),
+      ),
+      (_) => SourceLinks(ref: ref, data: data, extra: knowledge.externalIds),
+    ],
+    TitleSection.reviews => [
+      (_) => _SectionGroup('Viewer reviews', child: _Reviews(ref: ref)),
+    ],
+  };
 }
 
-class TitleGraph extends StatelessWidget {
-  const TitleGraph({required this.knowledge, super.key});
+class _SectionGroup extends StatelessWidget {
+  const _SectionGroup(this.title, {required this.child});
+  final String title;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => GraphPanel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [GraphHeading(title), child],
+    ),
+  );
+}
+
+class _CreditSpotlight extends StatelessWidget {
+  const _CreditSpotlight({required this.knowledge, required this.people});
   final TitleKnowledge knowledge;
+  final List<PersonCredit>? people;
 
   @override
   Widget build(BuildContext context) {
-    final media = knowledge.media;
-    final ref = media.ref;
-    final repo = context.read<CatalogueRepository>();
-    final data = knowledge.data;
-    final collection = knowledge.collection;
-    final companies = knowledge.companies;
-    final networks = knowledge.networks;
-    final keywords = knowledge.keywords;
-    final creators = knowledge.creators;
-    late final nextSeason = knowledge.seasons
-        .where((entry) => integer(entry['season_number']) != null)
+    final directors = [
+      for (final credit in people ?? const <PersonCredit>[])
+        if (credit.roles.any((role) => !role.cast && role.role == 'Director'))
+          credit.person,
+    ];
+    final cast = (people ?? const <PersonCredit>[])
+        .where((credit) => credit.roles.any((role) => role.cast))
+        .take(10)
         .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _remote(
-          repo,
-          ref,
-          KnowledgeSection.credits,
-          'Cast & crew',
-          Icons.groups_outlined,
-          (context, result) =>
-              CreditPeople(people: readCredits(result['cast'], result['crew'])),
-        ),
-        if (collection != null ||
-            creators.isNotEmpty ||
-            companies.isNotEmpty ||
-            networks.isNotEmpty ||
-            keywords != null)
-          GraphPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const GraphHeading('Explore connections'),
-                if (collection != null) _LinkGroup('Collection', [collection]),
-                if (creators.isNotEmpty) _LinkGroup('Created by', creators),
-                if (companies.isNotEmpty)
-                  _LinkGroup('Production companies', companies),
-                if (networks.isNotEmpty) _LinkGroup('TV networks', networks),
-                if (keywords != null)
-                  _LinkGroup('Keywords', keywords)
-                else
-                  const GraphMessage('Keyword metadata is unavailable.'),
-              ],
-            ),
-          ),
-        if (!media.isMovie) ...[
-          const SizedBox(height: 12),
-          GraphPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const GraphHeading('Seasons & episodes'),
-                if (nextSeason.isEmpty)
-                  GraphMessage(
-                    data['seasons'] is List
-                        ? 'TMDB lists no seasons.'
-                        : 'Season metadata is unavailable.',
-                  )
-                else
-                  Wrap(
-                    spacing: 7,
-                    runSpacing: 7,
-                    children: [
-                      for (final season in nextSeason)
-                        GraphLink(
-                          text(season['name']) ??
-                              'Season ${season['season_number']}',
-                          SeasonRoute((
-                            seriesId: media.id,
-                            seasonNumber: integer(season['season_number'])!,
-                          )),
-                          icon: Icons.video_library_outlined,
+        if (directors.isNotEmpty) _LinkGroup('Director', directors),
+        if (knowledge.creators.isNotEmpty)
+          _LinkGroup('Created by', knowledge.creators),
+        const GraphHeading('Top cast'),
+        if (cast.isEmpty)
+          GraphMessage(
+            people == null
+                ? 'Cast data is unavailable.'
+                : 'No cast credits are listed.',
+          )
+        else
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final width = (constraints.maxWidth / 3.1).clamp(100.0, 154.0);
+              final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+              return SizedBox(
+                height: width * 1.5 + 73 * scale,
+                child: ListView.separated(
+                  key: const PageStorageKey('spotlight-cast'),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: cast.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 11),
+                  itemBuilder: (_, index) {
+                    final credit = cast[index];
+                    return SizedBox(
+                      width: width,
+                      child: EntityResultCard(
+                        link: EntityLink(
+                          credit.person.ref,
+                          credit.person.name,
+                          image: credit.person.image,
+                          caption: credit.roles
+                              .firstWhere((role) => role.cast)
+                              .role,
                         ),
-                    ],
-                  ),
-                if (data['last_episode_to_air'] != null ||
-                    data['next_episode_to_air'] != null)
-                  Wrap(
-                    spacing: 7,
-                    runSpacing: 5,
-                    children: [
-                      for (final (field, label) in const [
-                        ('last_episode_to_air', 'Last aired'),
-                        ('next_episode_to_air', 'Next episode'),
-                      ])
-                        if (object(data[field]) case final episode?)
-                          if (_episodeRef(media.id, episode) case final ref?)
-                            GraphLink(
-                              '$label · ${text(episode['name']) ?? 'Episode ${ref.episodeNumber}'}',
-                              EpisodeRoute(ref),
-                              icon: Icons.slow_motion_video_outlined,
-                            ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 12),
-        _remote(
-          repo,
-          ref,
-          KnowledgeSection.providers,
-          'Where to watch',
-          Icons.ondemand_video_rounded,
-          (context, result) => WatchAvailability(result: result),
-        ),
-        _remote(
-          repo,
-          ref,
-          KnowledgeSection.videos,
-          'Trailers & videos',
-          Icons.play_circle_outline_rounded,
-          (context, result) => _Videos(data: result),
-        ),
-        _remote(
-          repo,
-          ref,
-          KnowledgeSection.images,
-          'Image gallery',
-          Icons.photo_library_outlined,
-          (context, result) => Gallery(
-            data: result,
-            groups: const [
-              ('backdrops', 'Backdrops', ArtworkKind.backdrop),
-              ('posters', 'Posters', ArtworkKind.poster),
-              ('logos', 'Logos', ArtworkKind.logo),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 9),
-          child: GraphSection(
-            key: const PageStorageKey('title-reviews'),
-            title: 'Reviews',
-            icon: Icons.rate_review_outlined,
-            builder: (_) => _Reviews(ref: ref),
-          ),
-        ),
-        _remote(
-          repo,
-          ref,
-          media.isMovie ? KnowledgeSection.releases : KnowledgeSection.ratings,
-          media.isMovie
-              ? 'Release dates & certifications'
-              : 'Regional content ratings',
-          Icons.event_outlined,
-          (context, result) =>
-              _RegionalReleases(result: result, movie: media.isMovie),
-        ),
-        _remote(
-          repo,
-          ref,
-          KnowledgeSection.alternateTitles,
-          'Alternate titles',
-          Icons.translate_rounded,
-          (context, result) => _AlternateTitles(data: result),
-        ),
-        _remote(
-          repo,
-          ref,
-          KnowledgeSection.translations,
-          'Localized titles & summaries',
-          Icons.language_outlined,
-          (context, result) => _Translations(data: result),
-        ),
-        for (final recommended in [false, true])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 9),
-            child: GraphSection(
-              key: PageStorageKey('title-related-$recommended'),
-              title: recommended
-                  ? 'Recommended titles'
-                  : (media.isMovie ? 'Similar movies' : 'Similar TV shows'),
-              icon: recommended
-                  ? Icons.auto_awesome_outlined
-                  : Icons.copy_all_outlined,
-              builder: (_) => GraphLoad<List<Media>>(
-                load: ({required refresh}) => repo.related(
-                  ref,
-                  recommended: recommended,
-                  refresh: refresh,
-                ),
-                builder: (_, items) => items.isEmpty
-                    ? const GraphMessage(
-                        'TMDB lists no related titles in this section.',
-                      )
-                    : PosterShelf(
-                        title: 'Explore titles',
-                        shelfId: '${ref.id}-related-$recommended',
-                        items: items,
+                        heroTag:
+                            'spotlight-${knowledge.media.key}-${credit.person.ref.id}',
                       ),
-              ),
-            ),
+                    );
+                  },
+                ),
+              );
+            },
           ),
-        SourceLinks(ref: ref, data: data, extra: knowledge.externalIds),
       ],
     );
   }
+}
 
-  Widget _remote(
-    CatalogueRepository repo,
-    EntityRef ref,
-    KnowledgeSection section,
-    String title,
-    IconData icon,
-    GraphBuilder<Json> paint,
-  ) => Padding(
-    padding: const EdgeInsets.only(bottom: 9),
-    child: GraphSection(
-      key: PageStorageKey('title-${section.name}'),
-      title: title,
-      icon: icon,
-      builder: (_) => GraphLoad<Json>(
-        load: ({required refresh}) =>
-            repo.section(ref, section, refresh: refresh),
-        builder: paint,
+class _SeasonSections extends StatelessWidget {
+  const _SeasonSections(this.knowledge, {this.compactList = false});
+  final TitleKnowledge knowledge;
+  final bool compactList;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = knowledge.media;
+    final data = knowledge.data;
+    final seasons = knowledge.seasons.where(
+      (entry) => (integer(entry['season_number']) ?? -1) >= 0,
+    );
+    return _SectionGroup(
+      'Seasons & episodes',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (seasons.isEmpty)
+            GraphMessage(
+              data['seasons'] is List
+                  ? 'TMDB lists no seasons.'
+                  : 'Season metadata is unavailable.',
+            )
+          else if (compactList)
+            Wrap(
+              spacing: 7,
+              runSpacing: 5,
+              children: [
+                for (final season in seasons.take(6))
+                  GraphLink(
+                    text(season['name']) ?? 'Season ${season['season_number']}',
+                    SeasonRoute((
+                      seriesId: media.id,
+                      seasonNumber: integer(season['season_number'])!,
+                    )),
+                    icon: Icons.video_library_outlined,
+                  ),
+              ],
+            )
+          else
+            _BatchedRows(
+              count: seasons.length,
+              item: (index) {
+                final season = seasons.elementAt(index);
+                final number = integer(season['season_number'])!;
+                final name = text(season['name']) ?? 'Season $number';
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                  leading: SizedBox(
+                    width: 39,
+                    height: 54,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(7),
+                      child: CineArt(path: text(season['poster_path'])),
+                    ),
+                  ),
+                  title: Text(name),
+                  subtitle: Text(
+                    [
+                      if (integer(season['episode_count']) case final count?)
+                        '$count episodes',
+                      ?text(season['air_date']),
+                    ].join('  ·  '),
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => CineNavigation.of(context).open(
+                    context,
+                    SeasonRoute((seriesId: media.id, seasonNumber: number)),
+                    label: name,
+                  ),
+                );
+              },
+            ),
+          Wrap(
+            spacing: 7,
+            runSpacing: 5,
+            children: [
+              for (final (field, label) in const [
+                ('last_episode_to_air', 'Last aired'),
+                ('next_episode_to_air', 'Next episode'),
+              ])
+                if (object(data[field]) case final episode?)
+                  if (_episodeRef(media.id, episode) case final ref?)
+                    GraphLink(
+                      '$label · ${text(episode['name']) ?? 'Episode ${ref.episodeNumber}'}',
+                      EpisodeRoute(ref),
+                      icon: Icons.slow_motion_video_outlined,
+                    ),
+            ],
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 EpisodeRef? _episodeRef(int series, Json item) {

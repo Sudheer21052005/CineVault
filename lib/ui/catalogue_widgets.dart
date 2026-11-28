@@ -68,9 +68,10 @@ class _PosterCardState extends State<PosterCard> {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(13),
-                      child: Hero(
-                        tag: widget.heroTag,
-                        child: CineArt(path: media.posterPath),
+                      child: sharedArt(
+                        context,
+                        widget.heroTag,
+                        CineArt(path: media.posterPath),
                       ),
                     ),
                     if (!media.isMovie)

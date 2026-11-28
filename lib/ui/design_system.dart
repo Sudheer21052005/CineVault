@@ -6,18 +6,38 @@ import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 
 import '../core/material.dart';
 
-const canvas = Color(0xFF090C13);
-const surface = Color(0xFF101623);
-const elevated = Color(0xFF171F2E);
-const outline = Color(0xFF263247);
+const canvas = Color(0xFF090D16);
+const surface = Color(0xFF121B2A);
+const elevated = Color(0xFF1B273A);
+const outline = Color(0xFF2F405A);
 const ink = Color(0xFFF4F6FC);
 const muted = Color(0xFFAAB6C9);
-const blue = Color(0xFF5A97FF);
+const blue = Color(0xFF81AEFF);
 const primaryInk = Color(0xFF071426);
-const gold = Color(0xFFF5CB75);
+const gold = Color(0xFFF5CC83);
 const watched = Color(0xFF70D8B1);
 const watching = Color(0xFFFFB767);
 const danger = Color(0xFFFF9C9F);
+
+Duration cineMotion(BuildContext context, [int milliseconds = 190]) =>
+    MediaQuery.disableAnimationsOf(context)
+    ? Duration.zero
+    : Duration(milliseconds: milliseconds);
+
+class CineStateIcon extends StatelessWidget {
+  const CineStateIcon(this.icon, {required this.size, super.key});
+  final IconData icon;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => AnimatedSwitcher(
+    duration: cineMotion(context, 190),
+    switchInCurve: Curves.easeOutBack,
+    transitionBuilder: (child, animation) =>
+        ScaleTransition(scale: animation, child: child),
+    child: Icon(icon, size: size, key: ValueKey(icon)),
+  );
+}
 
 enum CineWidth { compact, medium, expanded }
 
@@ -174,7 +194,7 @@ class _CineTransition extends PageTransitionsBuilder {
   const _CineTransition();
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 200);
+  Duration get transitionDuration => const Duration(milliseconds: 245);
 
   @override
   Widget buildTransitions<T>(

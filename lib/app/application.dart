@@ -168,6 +168,7 @@ class _Entry {
     this.route, {
     this.summary,
     this.heroTag,
+    this.artwork,
     this.label,
     this.direct = false,
     PageStorageBucket? bucket,
@@ -177,6 +178,7 @@ class _Entry {
   final CineRoute route;
   final Media? summary;
   final String? heroTag;
+  final String? artwork;
   final String? label;
   final bool direct;
   final PageStorageBucket bucket;
@@ -188,6 +190,7 @@ class _HistoryEntry {
   final int id;
   final List<_Entry> stack;
   final int? parent;
+  AppTab get tab => (stack.first.route as TabRoute).tab;
 }
 
 class _CineRouter extends RouterDelegate<_Location>
@@ -195,6 +198,7 @@ class _CineRouter extends RouterDelegate<_Location>
   _CineRouter(this._performance, this._startupWatch, CineRoute initial) {
     _active = _HistoryEntry(++_serial, _stackFor(initial));
     _history[_active.id] = _active;
+    _remember(_active);
     if (initial is TabRoute && initial.tab == AppTab.search) {
       _lastSearch = initial;
     }
@@ -204,6 +208,11 @@ class _CineRouter extends RouterDelegate<_Location>
   final AppPerformance _performance;
   final Stopwatch _startupWatch;
   final _history = <int, _HistoryEntry>{};
+  final _branches = <AppTab, List<_Entry>>{};
+  final _lastTab = <AppTab, AppTab>{};
+  final _navigatorKeys = <AppTab, GlobalKey<NavigatorState>>{};
+  final _heroControllers = <AppTab, HeroController>{};
+  final _shellNavigator = GlobalKey<NavigatorState>();
   final _searchRequests = ValueNotifier<int>(0);
   late _HistoryEntry _active;
   var _lastSearch = const TabRoute(AppTab.search);
@@ -214,7 +223,10 @@ class _CineRouter extends RouterDelegate<_Location>
   bool _disposed = false;
 
   @override
-  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  GlobalKey<NavigatorState> get navigatorKey => _keyFor(_active.tab);
+
+  GlobalKey<NavigatorState> _keyFor(AppTab tab) =>
+      _navigatorKeys.putIfAbsent(tab, () => GlobalKey<NavigatorState>());
 
   @override
   _Location get currentConfiguration =>
@@ -251,6 +263,7 @@ class _CineRouter extends RouterDelegate<_Location>
 
   void _activate(_HistoryEntry entry, Stopwatch? watch) {
     _active = entry;
+    _remember(entry);
     _history[entry.id] = entry;
     if (_history.length > 80) {
       _history.remove(_history.keys.firstWhere((id) => id != entry.id));
@@ -274,11 +287,17 @@ class _CineRouter extends RouterDelegate<_Location>
     notifyListeners();
   }
 
+  void _remember(_HistoryEntry entry) {
+    _branches[entry.tab] = entry.stack;
+    _lastTab[entry.tab.destination] = entry.tab;
+  }
+
   void _open(
     BuildContext context,
     CineRoute route, {
     Media? summary,
     String? heroTag,
+    String? artwork,
     String? label,
   }) {
     if (_active.stack.last.route.uri == route.uri) return;
@@ -295,6 +314,7 @@ class _CineRouter extends RouterDelegate<_Location>
             route,
             summary: summary,
             heroTag: heroTag,
+            artwork: artwork,
             label: label ?? summary?.title,
           ),
         ],
@@ -305,11 +325,30 @@ class _CineRouter extends RouterDelegate<_Location>
   }
 
   void _select(BuildContext context, AppTab tab) {
+    _selectBranch(context, tab, reset: tab == _active.tab);
+  }
+
+  void _selectDestination(BuildContext context, AppTab destination) {
+    final reselected = _active.tab.destination == destination;
+    final tab = reselected ? destination : _lastTab[destination] ?? destination;
+    if (reselected && tab != _active.tab) {
+      _branches[_active.tab] = [_active.stack.first];
+    }
+    _selectBranch(context, tab, reset: reselected);
+  }
+
+  void _openSearch(BuildContext context) =>
+      _selectBranch(context, AppTab.search, reset: true);
+
+  void _selectBranch(BuildContext context, AppTab tab, {required bool reset}) {
     final route = tab == AppTab.search ? _lastSearch : TabRoute(tab);
-    if (_active.stack.last.route.uri == route.uri) return;
+    final current = _branches[tab];
+    final branch = current ?? _stackFor(route);
+    final stack = reset ? [branch.first] : branch;
+    if (tab == _active.tab && stack.last.id == _active.stack.last.id) return;
     Router.navigate(
       context,
-      () => _replaceStack(_stackFor(route), Stopwatch()..start()),
+      () => _replaceStack(stack, Stopwatch()..start(), parent: _active.id),
     );
   }
 
@@ -322,7 +361,9 @@ class _CineRouter extends RouterDelegate<_Location>
     }
     Router.neglect(context, () {
       _activate(
-        _HistoryEntry(_active.id, [_Entry(_active.stack.first.id, route)]),
+        _HistoryEntry(_active.id, [
+          _Entry(_active.stack.first.id, route),
+        ], parent: _active.parent),
         null,
       );
     });
@@ -330,12 +371,12 @@ class _CineRouter extends RouterDelegate<_Location>
 
   void _back(BuildContext context) {
     final stack = _active.stack;
-    final previous = _history[_active.parent]?.stack;
+    final previous = _history[_active.parent];
     if (kIsWeb &&
         stack.length > 1 &&
         previous != null &&
-        previous.length == stack.length - 1 &&
-        previous.last.id == stack[stack.length - 2].id) {
+        previous.stack.length == stack.length - 1 &&
+        previous.stack.last.id == stack[stack.length - 2].id) {
       goBrowserBack();
       return;
     }
@@ -345,6 +386,14 @@ class _CineRouter extends RouterDelegate<_Location>
 
   void _popStack(Stopwatch watch) {
     final stack = _active.stack;
+    final previous = _history[_active.parent];
+    if (previous != null &&
+        ((stack.length == 1 && previous.tab != _active.tab) ||
+            (stack.length > 1 &&
+                previous.stack.last.id == stack[stack.length - 2].id))) {
+      _activate(previous, watch);
+      return;
+    }
     final current = stack.last;
     final parent = current.direct
         ? switch (current.route) {
@@ -368,7 +417,10 @@ class _CineRouter extends RouterDelegate<_Location>
         ? [stack.first, _Entry(++_serial, parent, direct: true)]
         : stack.length > 1
         ? stack.sublist(0, stack.length - 1)
-        : _stackFor(const TabRoute(AppTab.home));
+        : [
+            _branches[AppTab.home]?.first ??
+                _Entry(++_serial, const TabRoute(AppTab.home)),
+          ];
     _activate(_HistoryEntry(_active.id, next), watch);
   }
 
@@ -399,12 +451,17 @@ class _CineRouter extends RouterDelegate<_Location>
 
   @override
   Future<bool> popRoute() async {
+    if (_shellNavigator.currentState case final shell? when shell.canPop()) {
+      return shell.maybePop();
+    }
     final navigator = navigatorKey.currentState;
     if (navigator == null) return false;
     if (await navigator.maybePop()) return true;
     if (!navigator.mounted) return false;
+    final previousTab = _history[_active.parent]?.tab;
     if (_active.stack.length > 1 ||
-        (_active.stack.first.route as TabRoute).tab != AppTab.home) {
+        _active.tab != AppTab.home ||
+        (previousTab != null && previousTab != _active.tab)) {
       _back(navigator.context);
       return true;
     }
@@ -456,66 +513,117 @@ class _CineRouter extends RouterDelegate<_Location>
     return CineNavigation(
       open: _open,
       select: _select,
+      selectDestination: _selectDestination,
+      openSearch: _openSearch,
       updateSearch: _updateSearch,
       replace: _replace,
       back: _back,
       searchRequests: _searchRequests,
-      child: ResponsiveShell(
-        tab: root.tab,
-        covered: _active.stack.length > 1,
-        routeLabel:
-            current.label ??
-            switch (current.route) {
-              final TitleRoute route => entityLabel(route.ref.kind),
-              FilmographyRoute() => 'Filmography',
-              final SeasonRoute route =>
-                route.ref.seasonNumber == 0
-                    ? 'Specials'
-                    : 'Season ${route.ref.seasonNumber}',
-              final EpisodeRoute route => 'Episode ${route.ref.episodeNumber}',
-              GenreRoute() => 'Genre',
-              final FeedRoute route => route.feed.label,
-              _ => null,
-            },
-        onAbout: () {
-          final view = navigatorKey.currentState;
-          if (view != null) showCineAbout(view.context);
-        },
-        child: Navigator(
-          key: navigatorKey,
-          pages: [
-            MaterialPage<void>(
-              key: _shellKey,
-              child: ScrollWatch(
-                area: root.area,
-                child: MainShell(
-                  tab: root.tab,
-                  searchRoute: _lastSearch,
-                  covered: _active.stack.length > 1,
+      child: Navigator(
+        key: _shellNavigator,
+        pages: [
+          MaterialPage<void>(
+            key: const ValueKey('persistent-cinevault-shell'),
+            // The router owns Android Back, including the exit confirmation.
+            // Keep the root Navigator eligible even when a hidden branch reports
+            // that its own stack is at the root.
+            child: PopScope<void>(
+              canPop: false,
+              child: ResponsiveShell(
+                tab: root.tab,
+                covered: _active.stack.length > 1,
+                routeLabel:
+                    current.label ??
+                    switch (current.route) {
+                      final TitleRoute route => entityLabel(route.ref.kind),
+                      FilmographyRoute() => 'Filmography',
+                      final SeasonRoute route =>
+                        route.ref.seasonNumber == 0
+                            ? 'Specials'
+                            : 'Season ${route.ref.seasonNumber}',
+                      final EpisodeRoute route =>
+                        'Episode ${route.ref.episodeNumber}',
+                      GenreRoute() => 'Genre',
+                      final FeedRoute route => route.feed.label,
+                      _ => null,
+                    },
+                onAbout: () {
+                  final view = navigatorKey.currentState;
+                  if (view != null) showCineAbout(view.context);
+                },
+                child: IndexedStack(
+                  index: _branches.keys.toList().indexOf(_active.tab),
+                  children: [
+                    for (final entry in _branches.entries)
+                      KeyedSubtree(
+                        key: ValueKey(entry.key),
+                        child: TickerMode(
+                          enabled: entry.key == _active.tab,
+                          child: ExcludeFocus(
+                            excluding: entry.key != _active.tab,
+                            child: HeroControllerScope(
+                              controller: _heroControllers.putIfAbsent(
+                                entry.key,
+                                MaterialApp.createMaterialHeroController,
+                              ),
+                              child: _buildBranch(
+                                context,
+                                entry.key,
+                                entry.value,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
-            for (final (index, entry) in _active.stack.indexed.skip(1))
-              MaterialPage<void>(
-                key: ValueKey(entry.id),
-                maintainState: index >= _active.stack.length - 5,
-                child: PageStorage(
-                  bucket: entry.bucket,
-                  child: ScrollWatch(
-                    area: entry.route.area,
-                    child: _buildPage(context, entry),
-                  ),
-                ),
-              ),
-          ],
-          onDidRemovePage: (page) {
-            final top = _active.stack.last;
-            if (_active.stack.length > 1 && page.key == ValueKey(top.id)) {
-              _back(context);
-            }
-          },
-        ),
+          ),
+        ],
+        onDidRemovePage: (_) {},
       ),
+    );
+  }
+
+  Widget _buildBranch(BuildContext context, AppTab tab, List<_Entry> stack) {
+    final active = tab == _active.tab;
+    return Navigator(
+      key: _keyFor(tab),
+      pages: [
+        MaterialPage<void>(
+          key: _shellKey,
+          child: ScrollWatch(
+            area: tab.area,
+            child: MainShell(
+              tab: tab,
+              searchRoute: _lastSearch,
+              covered: !active || stack.length > 1,
+            ),
+          ),
+        ),
+        for (final (index, entry) in stack.indexed.skip(1))
+          MaterialPage<void>(
+            key: ValueKey(entry.id),
+            maintainState: active && index >= stack.length - 5,
+            child: PageStorage(
+              bucket: entry.bucket,
+              child: ScrollWatch(
+                area: entry.route.area,
+                child: _buildPage(context, entry),
+              ),
+            ),
+          ),
+      ],
+      onDidRemovePage: (page) {
+        final top = _active.stack.last;
+        if (active &&
+            tab == _active.tab &&
+            _active.stack.length > 1 &&
+            page.key == ValueKey(top.id)) {
+          _back(context);
+        }
+      },
     );
   }
 
@@ -534,7 +642,12 @@ class _CineRouter extends RouterDelegate<_Location>
           loader: context.read<CatalogueRepository>().feedLoader(route.feed),
         ),
         final TitleRoute route when route.ref.kind == EntityKind.person =>
-          PersonPage(ref: route.ref),
+          PersonPage(
+            ref: route.ref,
+            heroTag: entry.heroTag,
+            portrait: entry.artwork,
+            previewName: entry.label,
+          ),
         final TitleRoute route => CatalogueEntityPage(ref: route.ref),
         final FilmographyRoute route => FilmographyPage(route: route),
         final SeasonRoute route => SeasonPage(ref: route.ref),
@@ -558,6 +671,9 @@ class _CineRouter extends RouterDelegate<_Location>
   void dispose() {
     _disposed = true;
     _searchRequests.dispose();
+    for (final controller in _heroControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 }

@@ -36,8 +36,13 @@ class MediaDetailsPage extends StatefulWidget {
 
 class _MediaDetailsPageState extends State<MediaDetailsPage> {
   late final _catalogue = context.read<CatalogueRepository>();
+  final _scroll = ScrollController();
+  final _tabAnchor = GlobalKey();
+  final _palette = ValueNotifier<Color>(const Color(0xFF314D76));
+  TitleSection _section = TitleSection.overview;
   late Future<TitleKnowledge> _request;
   TitleKnowledge? _lastGood;
+  bool _restoredTab = false;
 
   @override
   void initState() {
@@ -45,8 +50,42 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
     _request = _fetch();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_restoredTab) return;
+    _restoredTab = true;
+    final previous = PageStorage.maybeOf(context)
+        ?.readState(context, identifier: 'title-selected-section');
+    if (previous is TitleSection) _section = previous;
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    _palette.dispose();
+    super.dispose();
+  }
+
   Future<TitleKnowledge> _fetch({bool refresh = false}) async =>
       _lastGood = await _catalogue.titleKnowledge(widget.ref, refresh: refresh);
+
+  void _select(TitleSection section) {
+    if (_section == section) return;
+    setState(() => _section = section);
+    PageStorage.maybeOf(context)
+        ?.writeState(context, section, identifier: 'title-selected-section');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final anchor = _tabAnchor.currentContext;
+      if (mounted && _section == section && anchor != null) {
+        Scrollable.ensureVisible(
+          anchor,
+          duration: cineMotion(context, 180),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<TitleKnowledge>(
@@ -54,24 +93,50 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
     builder: (context, snapshot) {
       final knowledge = snapshot.data ?? _lastGood;
       final item = knowledge?.media ?? widget.summary;
-      return Material(
-        color: canvas,
+      final compact = CineLayout.widthOf(context) == CineWidth.compact;
+      final personal =
+          item != null && context.watch<PersonalLibrary?>()?.ready == true
+          ? PersonalActions(
+              key: ValueKey(item.key),
+              title: PersonalTitle.media(item, data: knowledge?.data),
+              details: knowledge,
+              compact: compact,
+            )
+          : null;
+      final sections = [
+        for (final section in TitleSection.values)
+          if (section != TitleSection.seasons ||
+              widget.ref.kind == EntityKind.tv)
+            section,
+      ];
+      final blocks = <WidgetBuilder>[
+        if (item != null &&
+            (_section == TitleSection.overview ||
+                _section == TitleSection.details))
+          (_) => _DetailOverview(
+            media: item,
+            raw: _section == TitleSection.details ? knowledge?.data : null,
+            showStory: _section == TitleSection.overview,
+          ),
+        if (knowledge != null) ...titleSectionBlocks(knowledge, _section),
+      ];
+      return ValueListenableBuilder<Color>(
+        valueListenable: _palette,
         child: CinePage(
+          controller: _scroll,
           scrollKey: PageStorageKey(
             'details-${widget.ref.kind.name}-${widget.ref.id}',
           ),
           slivers: [
             if (item == null)
               CineSliver(
-                top: 20,
-                bottom: 15,
+                top: 17,
+                bottom: 14,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (CineLayout.widthOf(context) == CineWidth.compact) ...[
+                    if (CineLayout.widthOf(context) == CineWidth.compact)
                       const _DetailBack(),
-                      const SizedBox(height: 12),
-                    ],
                     if (!snapshot.hasError)
                       const CineSkeleton(height: 345, radius: 22),
                   ],
@@ -79,13 +144,18 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
               )
             else
               CineSliver(
-                top: 20,
-                bottom: 25,
-                child: _DetailBillboard(media: item, heroTag: widget.heroTag),
+                top: 16,
+                bottom: 11,
+                child: _DetailBillboard(
+                  media: item,
+                  heroTag: widget.heroTag,
+                  onPalette: (value) => _palette.value = value,
+                  compactActions: compact ? personal : null,
+                ),
               ),
             if (snapshot.hasError)
               CineSliver(
-                bottom: 17,
+                bottom: 13,
                 child: MessageState(
                   icon: Icons.cloud_off_rounded,
                   message: catalogueError(snapshot.error),
@@ -93,27 +163,137 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
                       setState(() => _request = _fetch(refresh: true)),
                 ),
               ),
-            if (item != null &&
-                context.watch<PersonalLibrary?>()?.ready == true)
-              CineSliver(
-                bottom: 15,
-                child: PersonalActions(
-                  key: ValueKey(item.key),
-                  title: PersonalTitle.media(item, data: knowledge?.data),
-                  details: knowledge,
+            if (!compact && personal != null)
+              CineSliver(bottom: 9, child: personal),
+            if (item != null)
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _TitleTabHeader(
+                  anchor: _tabAnchor,
+                  sections: sections,
+                  active: _section,
+                  onSelect: _select,
+                  height:
+                      (MediaQuery.textScalerOf(context).scale(14) / 14 * 23 +
+                              29)
+                          .clamp(52.0, 94.0),
+                  gutter: CineLayout.gutterOf(context),
                 ),
               ),
-            if (item != null)
-              CineSliver(
-                bottom: 20,
-                child: _DetailOverview(media: item, raw: knowledge?.data),
+            if (item != null &&
+                knowledge == null &&
+                _section != TitleSection.overview &&
+                !snapshot.hasError)
+              const CineSliver(top: 14, child: CineSkeleton(height: 120)),
+            if (blocks.isNotEmpty)
+              SliverPadding(
+                key: ValueKey(_section),
+                padding: EdgeInsets.fromLTRB(
+                  CineLayout.gutterOf(context),
+                  19,
+                  CineLayout.gutterOf(context),
+                  12,
+                ),
+                sliver: SliverList.builder(
+                  itemCount: blocks.length,
+                  itemBuilder: (context, index) => Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    child: _section == TitleSection.overview
+                        ? blocks[index](context)
+                        : TweenAnimationBuilder<double>(
+                            duration: cineMotion(context, 155),
+                            tween: Tween(begin: .88, end: 1),
+                            curve: Curves.easeOutCubic,
+                            child: blocks[index](context),
+                            builder: (_, opacity, child) =>
+                                Opacity(opacity: opacity, child: child),
+                          ),
+                  ),
+                ),
               ),
-            if (knowledge != null)
-              CineSliver(child: TitleGraph(knowledge: knowledge)),
           ],
+        ),
+        builder: (context, tone, child) => AnimatedContainer(
+          duration: cineMotion(context, 320),
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: const Alignment(.46, -.89),
+              radius: 1.18,
+              colors: [
+                Color.alphaBlend(tone.withValues(alpha: .34), canvas),
+                canvas,
+              ],
+            ),
+          ),
+          child: child,
         ),
       );
     },
+  );
+}
+
+class _TitleTabHeader extends SliverPersistentHeaderDelegate {
+  const _TitleTabHeader({
+    required this.anchor,
+    required this.sections,
+    required this.active,
+    required this.onSelect,
+    required this.height,
+    required this.gutter,
+  });
+  final GlobalKey anchor;
+  final List<TitleSection> sections;
+  final TitleSection active;
+  final ValueChanged<TitleSection> onSelect;
+  final double height, gutter;
+
+  @override
+  double get minExtent => height;
+  @override
+  double get maxExtent => height;
+  @override
+  bool shouldRebuild(covariant _TitleTabHeader oldDelegate) =>
+      active != oldDelegate.active ||
+      height != oldDelegate.height ||
+      gutter != oldDelegate.gutter ||
+      sections.length != oldDelegate.sections.length;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => Material(
+    key: anchor,
+    color: const Color(0xFF111A29),
+    child: Container(
+      height: height,
+      padding: EdgeInsets.symmetric(horizontal: gutter),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: outline)),
+      ),
+      child: DefaultTabController(
+        length: sections.length,
+        initialIndex: sections.indexOf(active),
+        animationDuration: cineMotion(context, 190),
+        child: TabBar(
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 15),
+          labelColor: blue,
+          unselectedLabelColor: muted,
+          labelStyle: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+          ),
+          indicatorSize: TabBarIndicatorSize.tab,
+          indicatorColor: blue,
+          dividerColor: Colors.transparent,
+          onTap: (index) => onSelect(sections[index]),
+          tabs: [for (final section in sections) Tab(text: section.label)],
+        ),
+      ),
+    ),
   );
 }
 
@@ -136,131 +316,188 @@ class _DetailBack extends StatelessWidget {
 }
 
 class _DetailBillboard extends StatelessWidget {
-  const _DetailBillboard({required this.media, this.heroTag});
+  const _DetailBillboard({
+    required this.media,
+    required this.onPalette,
+    this.heroTag,
+    this.compactActions,
+  });
   final Media media;
   final String? heroTag;
+  final ValueChanged<Color> onPalette;
+  final Widget? compactActions;
+
+  Widget _poster(BuildContext context, double width) => SizedBox(
+    width: width,
+    height: width * 1.5,
+    child: sharedArt(
+      context,
+      heroTag,
+      ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: CineArt(path: media.posterPath),
+      ),
+    ),
+  );
+
+  Widget _image() => Stack(
+    fit: StackFit.expand,
+    children: [
+      CineArt(
+        path: media.backdropPath ?? media.posterPath,
+        kind: media.backdropPath == null
+            ? ArtworkKind.poster
+            : ArtworkKind.backdrop,
+        alignment: const Alignment(.10, -.20),
+        onPalette: onPalette,
+      ),
+      const DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0x19090D16), Color(0x00090D16), Color(0xF0090D16)],
+            stops: [0, .54, 1],
+          ),
+        ),
+      ),
+    ],
+  );
+
+  Widget _copy(BuildContext context, bool compact) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        '${media.isMovie ? 'MOVIE' : 'TV SHOW'}  ·  ${media.year}',
+        style: cineLabel(color: gold),
+      ),
+      const SizedBox(height: 5),
+      Semantics(
+        header: true,
+        child: Text(
+          media.title,
+          maxLines: compact ? 3 : 2,
+          overflow: TextOverflow.ellipsis,
+          style: cineDisplay(compact ? 32 : 62),
+        ),
+      ),
+      const SizedBox(height: 9),
+      Wrap(
+        spacing: 11,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (media.rating > 0) CineScore(media.rating),
+          if (media.isMovie && media.runtime != null)
+            Text('${media.runtime} min'),
+          if (media.seasons case final seasons?)
+            Text('$seasons ${seasons == 1 ? 'season' : 'seasons'}'),
+          if (media.genres.isNotEmpty)
+            Text(
+              media.genres.take(2).join(' / '),
+              style: const TextStyle(color: muted),
+            ),
+        ],
+      ),
+      if (!compact) ...[
+        const SizedBox(height: 15),
+        LibraryTitleAction(media: media, shortLabel: true),
+      ],
+    ],
+  );
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       final compact = CineLayout.widthOf(context) == CineWidth.compact;
       final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+      if (compact) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(19),
+          child: ColoredBox(
+            color: const Color(0xFF111A29),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AspectRatio(
+                  aspectRatio: 1.70,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _image(),
+                      const Positioned(top: 9, left: 9, child: _DetailBack()),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 13, 14, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (media.posterPath != null) ...[
+                            _poster(context, 60),
+                            const SizedBox(width: 13),
+                          ],
+                          Expanded(child: _copy(context, true)),
+                        ],
+                      ),
+                      const SizedBox(height: 11),
+                      Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          LibraryTitleAction(media: media, shortLabel: true),
+                          ?compactActions,
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
       final height =
-          (compact ? 353.0 : (box.maxWidth * .41).clamp(340.0, 455.0)) +
-          math.max(0, (scale - 1) * 182);
-      final poster = ClipRRect(
-        borderRadius: BorderRadius.circular(13),
-        child: CineArt(path: media.posterPath),
-      );
-      return SizedBox(
-        height: height,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(compact ? 18 : 24),
+          (box.maxWidth * .418).clamp(350.0, 490.0) +
+          math.max(0, (scale - 1) * 190);
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(23),
+        child: SizedBox(
+          height: height,
           child: Stack(
             fit: StackFit.expand,
             children: [
-              CineArt(
-                path: media.backdropPath ?? media.posterPath,
-                kind: media.backdropPath == null
-                    ? ArtworkKind.poster
-                    : ArtworkKind.backdrop,
-                alignment: const Alignment(.10, -.28),
-              ),
+              _image(),
               const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
                     colors: [
-                      Color(0x20090C13),
-                      Color(0x49090C13),
-                      Color(0xFF090C13),
+                      Color(0xF10A0E18),
+                      Color(0x9A0A0E18),
+                      Colors.transparent,
                     ],
-                    stops: [0, .30, .99],
+                    stops: [0, .38, .94],
                   ),
                 ),
               ),
-              if (!compact)
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Color(0xE9090C13),
-                        Color(0x8E090C13),
-                        Colors.transparent,
-                      ],
-                      stops: [0, .29, .85],
-                    ),
-                  ),
-                ),
-              if (compact)
-                const Positioned(top: 13, left: 13, child: _DetailBack()),
               Positioned(
-                left: compact ? 16 : 30,
-                right: compact ? 16 : 30,
-                bottom: compact ? 19 : 28,
+                left: 25,
+                right: 25,
+                bottom: 26,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (!compact)
-                      Container(
-                        width: 138,
-                        height: 207,
-                        margin: const EdgeInsets.only(right: 22),
-                        child: heroTag == null
-                            ? poster
-                            : Hero(tag: heroTag!, child: poster),
-                      ),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            media.isMovie ? 'MOVIE' : 'TV SHOW',
-                            style: cineLabel(color: gold),
-                          ),
-                          const SizedBox(height: 7),
-                          Semantics(
-                            header: true,
-                            child: Text(
-                              media.title,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: cineDisplay(compact ? 38 : 61),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 13,
-                            runSpacing: 5,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                media.year,
-                                style: const TextStyle(
-                                  color: ink,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              if (media.runtime != null)
-                                Text(
-                                  '${media.runtime} min',
-                                  style: const TextStyle(color: ink),
-                                ),
-                              if (media.seasons != null)
-                                Text(
-                                  '${media.seasons} ${media.seasons == 1 ? 'season' : 'seasons'}',
-                                  style: const TextStyle(color: ink),
-                                ),
-                              if (media.rating > 0) CineScore(media.rating),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          LibraryTitleAction(media: media),
-                        ],
-                      ),
-                    ),
+                    if (media.posterPath != null) ...[
+                      _poster(context, 122),
+                      const SizedBox(width: 21),
+                    ],
+                    Expanded(child: _copy(context, false)),
                   ],
                 ),
               ),
@@ -273,14 +510,19 @@ class _DetailBillboard extends StatelessWidget {
 }
 
 class _DetailOverview extends StatelessWidget {
-  const _DetailOverview({required this.media, this.raw});
+  const _DetailOverview({
+    required this.media,
+    this.raw,
+    required this.showStory,
+  });
+  final bool showStory;
   final Media media;
   final Json? raw;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
-      final wide = box.maxWidth >= 760;
+      final wide = showStory && box.maxWidth >= 760;
       final primaryWidth = wide ? box.maxWidth * .63 - 10 : box.maxWidth;
       final secondaryWidth = wide
           ? box.maxWidth - primaryWidth - 19
@@ -289,65 +531,66 @@ class _DetailOverview extends StatelessWidget {
         spacing: 19,
         runSpacing: 15,
         children: [
-          SizedBox(
-            width: primaryWidth,
-            child: DetailSection(
-              title: 'Overview',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (media.tagline case final String tagline)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(
-                        tagline,
-                        style: const TextStyle(
-                          color: gold,
-                          fontWeight: FontWeight.w700,
-                          height: 1.4,
+          if (showStory)
+            SizedBox(
+              width: primaryWidth,
+              child: DetailSection(
+                title: 'Storyline',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (media.tagline case final String tagline)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Text(
+                          tagline,
+                          style: const TextStyle(
+                            color: gold,
+                            fontWeight: FontWeight.w700,
+                            height: 1.4,
+                          ),
                         ),
                       ),
+                    Text(
+                      media.overview.isEmpty
+                          ? 'No overview is available for this title.'
+                          : media.overview,
+                      style: Theme.of(context).textTheme.bodyLarge
+                          ?.copyWith(color: muted),
                     ),
-                  Text(
-                    media.overview.isEmpty
-                        ? 'No overview is available for this title.'
-                        : media.overview,
-                    style: Theme.of(context).textTheme.bodyLarge
-                        ?.copyWith(color: muted),
-                  ),
-                  if (media.genres.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          if (media.linkedGenres.isNotEmpty)
-                            for (final genre in media.linkedGenres)
-                              ActionChip(
-                                label: Text(genre.name),
-                                onPressed: () =>
-                                    CineNavigation.of(context).open(
-                                      context,
-                                      GenreRoute((
-                                        kind: media.isMovie
-                                            ? MediaKind.movie
-                                            : MediaKind.tv,
-                                        id: genre.id,
-                                      )),
-                                      label: genre.name,
-                                    ),
-                              )
-                          else
-                            for (final name in media.genres)
-                              Chip(label: Text(name)),
-                        ],
+                    if (media.genres.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            if (media.linkedGenres.isNotEmpty)
+                              for (final genre in media.linkedGenres)
+                                ActionChip(
+                                  label: Text(genre.name),
+                                  onPressed: () =>
+                                      CineNavigation.of(context).open(
+                                        context,
+                                        GenreRoute((
+                                          kind: media.isMovie
+                                              ? MediaKind.movie
+                                              : MediaKind.tv,
+                                          id: genre.id,
+                                        )),
+                                        label: genre.name,
+                                      ),
+                                )
+                            else
+                              for (final name in media.genres)
+                                Chip(label: Text(name)),
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
           SizedBox(
             width: secondaryWidth,
             child: DetailSection(

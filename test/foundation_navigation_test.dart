@@ -88,15 +88,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Runtime: 148 minutes'), findsOneWidget);
       expect(harness.tmdb.paths, isNot(contains('/3/movie/27205/similar')));
-      expect(
-        harness.tmdb.paths,
-        isNot(contains('/3/movie/27205/recommendations')),
+      expect(harness.tmdb.paths, isNot(contains('/3/movie/27205/images')));
+      await tester.ensureVisible(find.text('Related'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Related'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('The Dark Knight').first,
+        260,
+        scrollable: find.byType(Scrollable).first,
       );
-      await tester.ensureVisible(find.text('Similar movies'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Similar movies'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('The Dark Knight').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('The Dark Knight').first);
       await tester.pumpAndSettle();

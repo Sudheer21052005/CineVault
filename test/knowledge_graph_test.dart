@@ -256,14 +256,14 @@ void main() {
   );
 
   testWidgets(
-    'direct movie, lazy credits and sorted filmography preserve the chain',
+    'direct movie exposes overview credits and preserves sorted filmography',
     (tester) async {
       final harness = _Harness();
       await harness.mount(tester, '/movie/27205');
       expect(find.text('Runtime: 148 minutes'), findsOneWidget);
       expect(
         harness.requests.map((entry) => entry.path),
-        isNot(contains('/3/movie/27205/credits')),
+        contains('/3/movie/27205/credits'),
       );
       expect(
         harness.requests.map((entry) => entry.path),
@@ -293,6 +293,7 @@ void main() {
   ) async {
     final harness = _Harness();
     await harness.mount(tester, '/tv/1396', size: const Size(390, 844));
+    await _tap(tester, 'Seasons');
     await _tap(tester, 'Season 1');
     expect(find.text('Episodes'), findsOneWidget);
     await _tap(tester, 'Pilot');
@@ -301,6 +302,34 @@ void main() {
     expect(find.text('Biography'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'mobile destinations retain separate entity histories and reselect their root',
+    (tester) async {
+      final harness = _Harness();
+      await harness.mount(tester, '/movie/27205', size: const Size(390, 844));
+      final bar = find.byKey(const ValueKey('mobile-bottom-nav'));
+      Finder tab(String label) =>
+          find.descendant(of: bar, matching: find.text(label));
+      expect(bar, findsOneWidget);
+      await _tap(tester, 'Cast & crew');
+      await _tap(tester, 'Christopher Nolan');
+      expect(find.text('Biography'), findsOneWidget);
+      await tester.tap(tab('Search'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsWidgets);
+      await tester.tap(tab('Home'));
+      await tester.pumpAndSettle();
+      expect(find.text('Biography'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Full credits'), findsOneWidget);
+      await tester.tap(tab('Home'));
+      await tester.pumpAndSettle();
+      expect(find.text('Trending this week'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 Future<void> _tap(

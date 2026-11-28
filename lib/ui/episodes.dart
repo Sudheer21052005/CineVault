@@ -315,6 +315,7 @@ class EpisodePage extends StatelessWidget {
                 load: ({required refresh}) =>
                     repo.episodeImages(ref, refresh: refresh),
                 builder: (_, data) => Gallery(
+                  title: text(data['name']) ?? 'Episode ${ref.episodeNumber}',
                   data: data,
                   groups: const [('stills', 'Stills', ArtworkKind.still)],
                 ),

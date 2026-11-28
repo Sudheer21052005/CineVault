@@ -16,6 +16,12 @@ enum AppTab {
   const AppTab(this.path, this.area);
   final String path;
   final PerfArea area;
+
+  AppTab get destination => switch (this) {
+    movies || tv || nowPlaying => discover,
+    stats => watchlist,
+    _ => this,
+  };
 }
 
 sealed class CineRoute {

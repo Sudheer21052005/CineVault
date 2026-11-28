@@ -278,16 +278,40 @@ class _FeaturedCarouselState extends State<_FeaturedCarousel> {
                               setState(() => _current = index);
                               _schedule();
                             },
-                            itemBuilder: (_, index) => _FeatureFrame(
-                              media: _items[index],
-                              compact: compact,
-                              onReady: () {
-                                if (mounted) {
-                                  _prefetch(width, compact, index);
-                                  _schedule();
-                                }
-                              },
-                            ),
+                            itemBuilder: (context, index) {
+                              final frame = _FeatureFrame(
+                                media: _items[index],
+                                compact: compact,
+                                onReady: () {
+                                  if (mounted) {
+                                    _prefetch(width, compact, index);
+                                    _schedule();
+                                  }
+                                },
+                              );
+                              if (MediaQuery.disableAnimationsOf(context)) {
+                                return frame;
+                              }
+                              return ClipRect(
+                                child: AnimatedBuilder(
+                                  animation: _controller,
+                                  child: frame,
+                                  builder: (_, child) {
+                                    final page = _controller.hasClients
+                                        ? _controller.page ??
+                                              _current.toDouble()
+                                        : _current.toDouble();
+                                    return Transform.scale(
+                                      scale:
+                                          1 +
+                                          (page - index).abs().clamp(0.0, 1.0) *
+                                              .025,
+                                      child: child,
+                                    );
+                                  },
+                                ),
+                              );
+                            },
                           ),
                           if (_items.length > 1)
                             Positioned(

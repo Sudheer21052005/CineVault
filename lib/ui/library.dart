@@ -19,10 +19,12 @@ class LibraryTitleAction extends StatelessWidget {
   const LibraryTitleAction({
     required this.media,
     this.compact = false,
+    this.shortLabel = false,
     super.key,
   });
   final Media media;
   final bool compact;
+  final bool shortLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -48,12 +50,16 @@ class LibraryTitleAction extends StatelessWidget {
             onPressed: action,
             overlay: true,
           )
-        : OutlinedButton.icon(
-            onPressed: action,
-            icon: Icon(icon, size: 19),
-            label: Text(label),
-            style: OutlinedButton.styleFrom(
-              backgroundColor: canvas.withValues(alpha: .77),
+        : Tooltip(
+            message: label,
+            excludeFromSemantics: !shortLabel,
+            child: OutlinedButton.icon(
+              onPressed: action,
+              icon: CineStateIcon(icon, size: 19),
+              label: Text(shortLabel ? 'Watchlist' : label),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: canvas.withValues(alpha: .77),
+              ),
             ),
           );
   }
