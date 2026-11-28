@@ -25,16 +25,24 @@ git clone https://github.com/Sudheer21052005/CineVault.git
 cd CineVault
 ```
 
-For the upgrade under review, fetch `feature/ui-redesign` from the contributor fork after cloning upstream.
+**Before merge**, fetch and check out `feature/ui-redesign` from the contributor fork to test the upgrade.
 
 ```sh
 git fetch https://github.com/nascent-sky/CineVault.git feature/ui-redesign
 git switch -c feature/ui-redesign FETCH_HEAD
 ```
 
-Install the dependencies for the checked-out branch with `flutter pub get`.
+**After merge**, use the upstream `main` branch. If you already cloned upstream, update your local `main` before continuing.
 
-Copy [.env.example](.env.example) to `.env` and replace the placeholder with your own TMDB v3 API key. Start the app with that file explicitly. [TMDB registration and authentication](https://developer.themoviedb.org/docs/authentication-application)
+For either checkout, run `flutter pub get` from the repository root. Copy [.env.example](.env.example) to `.env` and set `TMDB_API_KEY` to your own TMDB v3 API key. [TMDB registration and authentication](https://developer.themoviedb.org/docs/authentication-application)
+
+Plain `flutter run` does not load `.env`, so live TMDB catalogue access is unavailable even if the file exists. Use this command for normal development with live access.
+
+```sh
+flutter run --dart-define-from-file=.env
+```
+
+Use `flutter devices` to find a target and add `-d` to select it explicitly.
 
 ```sh
 flutter run -d chrome --dart-define-from-file=.env
@@ -42,13 +50,36 @@ flutter run -d windows --dart-define-from-file=.env
 flutter run -d <android-device-id> --dart-define-from-file=.env
 ```
 
-Use `flutter devices` to find a target. The build has no configured key by default; the app explains that live catalogue access needs configuration, and the local library remains available. `.env` is ignored by Git and excluded from Flutter assets. Passing `--dart-define-from-file=.env` makes the key extractable from that local build. Keep key-bearing builds private. A public build with managed live credentials needs an approved distribution design.
+`.env` is ignored by Git and excluded from Flutter assets. Passing `--dart-define-from-file=.env` makes the supplied key extractable from that local build. Keep key-bearing builds private. A public build with managed live credentials needs an approved distribution design.
 
 ## Build and verify
 
 ```sh
 flutter analyze
 flutter test
+```
+
+### Private release builds with live TMDB access
+
+Run these commands from the repository root with your configured `.env`.
+
+```sh
+flutter build apk --release --dart-define-from-file=.env
+flutter build windows --release --dart-define-from-file=.env
+flutter build web --release --dart-define-from-file=.env
+```
+
+| Platform | Release output |
+| --- | --- |
+| Android | `build/app/outputs/flutter-apk/app-release.apk` |
+| Windows x64 | `build/windows/x64/runner/Release/cinevault.exe` and its companion files in the same directory |
+| Web | `build/web/` served over HTTP |
+
+### Credential-free release builds
+
+These commands omit the TMDB key. Live catalogue access is unavailable and the local library remains usable. Both types of build use the output paths above, so save a copy before building the other variant if you need both.
+
+```sh
 flutter build web --release --no-web-resources-cdn
 flutter build apk --release
 flutter build windows --release
