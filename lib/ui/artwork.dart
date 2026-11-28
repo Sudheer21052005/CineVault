@@ -25,16 +25,13 @@ class CineArt extends StatelessWidget {
   Widget build(BuildContext context) {
     final path = this.path;
     if (path == null || path.isEmpty) return _fallback;
-    final policy = context.watch<ArtworkPolicy>();
-    policy.loadConfiguration();
+    context.read<ArtworkPolicy>().loadConfiguration();
     return LayoutBuilder(
       builder: (context, box) {
         final width = box.hasBoundedWidth ? box.maxWidth : 180.0;
-        final provider = policy.provider(
-          path,
-          kind,
-          width,
-          MediaQuery.devicePixelRatioOf(context),
+        final ratio = MediaQuery.devicePixelRatioOf(context);
+        final provider = context.select<ArtworkPolicy, ImageProvider<Object>>(
+          (policy) => policy.provider(path, kind, width, ratio),
         );
         return _ProgressiveArt(
           key: ValueKey(provider),
@@ -79,8 +76,16 @@ class _ProgressiveArt extends StatefulWidget {
 }
 
 class _ProgressiveArtState extends State<_ProgressiveArt> {
-  final _elapsed = Stopwatch()..start();
+  Stopwatch? _elapsed;
   bool _seen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (context.read<AppPerformance>().collecting) {
+      _elapsed = Stopwatch()..start();
+    }
+  }
 
   @override
   Widget build(BuildContext context) => Image(
@@ -94,19 +99,23 @@ class _ProgressiveArtState extends State<_ProgressiveArt> {
     frameBuilder: (context, child, frame, synchronous) {
       if (frame != null && !_seen) {
         _seen = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _elapsed.stop();
-          context.read<AppPerformance>().record(
-            PerfSample(
-              PerfEvent.artworkReady,
-              _elapsed.elapsed,
-              area: widget.kind.area,
-              outcome: PerfOutcome.success,
-            ),
-          );
-          widget.onReady?.call();
-        });
+        if (_elapsed != null || widget.onReady != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_elapsed case final elapsed?) {
+              elapsed.stop();
+              context.read<AppPerformance>().record(
+                PerfSample(
+                  PerfEvent.artworkReady,
+                  elapsed.elapsed,
+                  area: widget.kind.area,
+                  outcome: PerfOutcome.success,
+                ),
+              );
+            }
+            widget.onReady?.call();
+          });
+        }
       }
       if (synchronous ||
           widget.kind != ArtworkKind.backdrop ||

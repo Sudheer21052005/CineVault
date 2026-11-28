@@ -185,9 +185,14 @@ class _CineTransition extends PageTransitionsBuilder {
     Widget child,
   ) {
     if (MediaQuery.disableAnimationsOf(context)) return child;
-    return FadeTransition(
-      opacity: animation.drive(CurveTween(curve: Curves.easeOutCubic)),
-      child: child,
+    return SlideTransition(
+      position: animation.drive(
+        Tween(
+          begin: const Offset(0, .012),
+          end: Offset.zero,
+        ).chain(CurveTween(curve: Curves.easeOutCubic)),
+      ),
+      child: ColoredBox(color: canvas, child: child),
     );
   }
 }
@@ -245,13 +250,30 @@ class CinePage extends StatelessWidget {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1600),
-          child: onRefresh == null
-              ? scroll
-              : RefreshIndicator(onRefresh: onRefresh!, child: scroll),
+          child: LayoutBuilder(
+            builder: (_, viewport) => CineViewport(
+              width: viewport.maxWidth,
+              child: onRefresh == null
+                  ? scroll
+                  : RefreshIndicator(onRefresh: onRefresh!, child: scroll),
+            ),
+          ),
         ),
       ),
     );
   }
+}
+
+class CineViewport extends InheritedWidget {
+  const CineViewport({required this.width, required super.child, super.key});
+
+  final double width;
+
+  static double? maybeWidthOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<CineViewport>()?.width;
+
+  @override
+  bool updateShouldNotify(CineViewport oldWidget) => width != oldWidget.width;
 }
 
 class CineSliver extends StatelessWidget {

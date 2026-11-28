@@ -49,6 +49,36 @@ class MemoryPersonalStore implements PersonalStore {
 }
 
 void main() {
+  test(
+    'insight projections survive history-only updates and refresh on edits',
+    () async {
+      final transport = TmdbTransport(
+        credential: () async => 'fixture',
+        performance: AppPerformance(),
+        client: MockClient((_) async => http.Response('{"results":[]}', 200)),
+      );
+      addTearDown(transport.close);
+      final insights = PersonalInsights(
+        PersonalDiscovery(CatalogueRepository(transport)),
+      );
+      final state = PersonalState(favorites: {film.key: film});
+      final history = state.copy(history: {film.key: (title: film, time: day)});
+      const saved = <WatchlistItem>[];
+      final firstHome = insights.home(state, saved, day);
+      expect(insights.home(history, saved, day), same(firstHome));
+      expect(
+        insights.statistics(history, saved),
+        same(insights.statistics(state, saved)),
+      );
+      final edited = state.copy(diary: {'view': Viewing('view', film, day)});
+      final updatedHome = insights.home(edited, saved, day);
+      expect(updatedHome, isNot(same(firstHome)));
+      expect(insights.statistics(edited, saved).diary, 1);
+      expect(insights.statistics(edited, saved).minutes, 104);
+      await Future.wait([firstHome, updatedHome]);
+    },
+  );
+
   test('repeat views, nullable fields, lists, marks and recent entities survive reopening', () async {
     final store = MemoryPersonalStore();
     final library = PersonalLibrary(store, now: () => day);

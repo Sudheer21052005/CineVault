@@ -49,6 +49,67 @@ typedef TasteSource = ({PersonalTitle title, double weight, String reason});
 typedef PersonalPick = ({Media media, List<TasteSource> sources});
 typedef UpcomingPick = ({PersonalTitle title, String reason});
 
+/// Memoizes only the current library projections across route and sliver mounts.
+class PersonalInsights {
+  PersonalInsights(this._discovery);
+
+  final PersonalDiscovery _discovery;
+  Object? _homeKey;
+  Object? _statsKey;
+  DateTime? _requestedAt;
+  Future<(List<PersonalPick>, List<UpcomingPick>)>? _home;
+  PersonalStats? _stats;
+
+  Future<(List<PersonalPick>, List<UpcomingPick>)> home(
+    PersonalState state,
+    List<WatchlistItem> saved,
+    DateTime now,
+  ) {
+    final key = (
+      state.diary,
+      state.favorites,
+      state.hidden,
+      state.seasons,
+      state.marked,
+      saved,
+      calendarDay(now),
+    );
+    final age = now.difference(_requestedAt ?? now);
+    if (_homeKey == key &&
+        !age.isNegative &&
+        age < const Duration(minutes: 5)) {
+      return _home!;
+    }
+    _homeKey = key;
+    _requestedAt = now;
+    return _home = _loadHome(state, saved, now);
+  }
+
+  Future<(List<PersonalPick>, List<UpcomingPick>)> _loadHome(
+    PersonalState state,
+    List<WatchlistItem> saved,
+    DateTime now,
+  ) async {
+    final seeds = PersonalDiscovery.sources(state, saved);
+    final picks = _discovery.picks(state, saved, seeds);
+    final upcoming = _discovery.upcoming(state, seeds, now);
+    return (await picks, await upcoming);
+  }
+
+  PersonalStats statistics(PersonalState state, List<WatchlistItem> saved) {
+    final key = (
+      state.diary,
+      state.marked,
+      state.seasons,
+      state.favorites,
+      saved,
+    );
+    if (_statsKey == key) return _stats!;
+    _statsKey = key;
+    return _stats = PersonalStats(state, saved);
+  }
+}
+
 class PersonalDiscovery {
   PersonalDiscovery(this.repo);
   final CatalogueRepository repo;
@@ -101,37 +162,36 @@ class PersonalDiscovery {
         add(progress.series, completed.clamp(1, 6) / 2, 'Tracked episodes');
       }
     }
-    final ordered =
-        seeds.values.where((seed) {
-          final route = seed.title.route;
-          return route is TitleRoute &&
-              {
-                EntityKind.movie,
-                EntityKind.tv,
-                EntityKind.person,
-                EntityKind.collection,
-              }.contains(route.ref.kind);
-        }).toList()..sort((a, b) {
-          final score = b.weight.compareTo(a.weight);
-          return score == 0 ? a.title.key.compareTo(b.title.key) : score;
-        });
+    int rank(TasteSource a, TasteSource b) {
+      final score = b.weight.compareTo(a.weight);
+      return score == 0 ? a.title.key.compareTo(b.title.key) : score;
+    }
+
+    final top = <TasteSource>[];
     // Reserve one slot for a favorite person or franchise when the library has one.
-    final entity = ordered
-        .where(
-          (seed) => switch (seed.title.route) {
-            TitleRoute(
-              ref: (kind: EntityKind.person || EntityKind.collection, id: _),
-            ) =>
-              true,
-            _ => false,
-          },
-        )
-        .firstOrNull;
+    TasteSource? entity;
+    for (final seed in seeds.values) {
+      final route = seed.title.route;
+      if (route is! TitleRoute) continue;
+      switch (route.ref.kind) {
+        case EntityKind.person || EntityKind.collection:
+          if (entity == null || rank(seed, entity) < 0) entity = seed;
+        case EntityKind.movie || EntityKind.tv:
+          break;
+        default:
+          continue;
+      }
+      final index = top.indexWhere((other) => rank(seed, other) < 0);
+      if (index >= 0) {
+        top.insert(index, seed);
+      } else if (top.length < 3) {
+        top.add(seed);
+      }
+      if (top.length > 3) top.removeLast();
+    }
     return [
       for (final seed
-          in ordered
-              .where((seed) => seed != entity)
-              .take(entity == null ? 3 : 2))
+          in top.where((seed) => seed != entity).take(entity == null ? 3 : 2))
         seed,
       ?entity,
     ];

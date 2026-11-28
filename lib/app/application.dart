@@ -11,6 +11,7 @@ import '../core/material.dart';
 import '../core/performance.dart';
 import '../models/media.dart';
 import '../library/personal_library.dart';
+import '../library/personal_insights.dart';
 import '../providers/watchlist_provider.dart';
 import '../ui/about.dart';
 import '../ui/entities.dart';
@@ -89,6 +90,9 @@ class _CineVaultAppState extends State<CineVaultApp> {
       ChangeNotifierProvider.value(value: widget.watchlist),
       if (widget.personal != null)
         ChangeNotifierProvider.value(value: widget.personal!),
+      Provider(
+        create: (_) => PersonalInsights(PersonalDiscovery(widget.catalogue)),
+      ),
     ],
     child: MaterialApp.router(
       debugShowCheckedModeBanner: false,

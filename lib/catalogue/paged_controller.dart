@@ -61,6 +61,14 @@ class PagedController<T extends CatalogueItem> extends ChangeNotifier {
 
   Future<void> refresh() => _first(refresh: true);
 
+  bool canLoadNext({bool retry = false}) =>
+      !_disposed &&
+      _load != null &&
+      (_page?.hasMore ?? false) &&
+      !_loadingNext &&
+      (_status == PageStatus.ready || _status == PageStatus.failed) &&
+      (_nextError == null || retry);
+
   Future<void> _first({required bool refresh}) async {
     final load = _load;
     if (load == null) return;
@@ -86,16 +94,9 @@ class PagedController<T extends CatalogueItem> extends ChangeNotifier {
   }
 
   Future<void> loadNext({bool retry = false}) async {
-    final load = _load;
-    final page = _page;
-    if (load == null ||
-        page == null ||
-        !page.hasMore ||
-        _loadingNext ||
-        (_status != PageStatus.ready && _status != PageStatus.failed) ||
-        (_nextError != null && !retry)) {
-      return;
-    }
+    if (!canLoadNext(retry: retry)) return;
+    final load = _load!;
+    final page = _page!;
     final generation = _generation;
     _loadingNext = true;
     _nextError = null;

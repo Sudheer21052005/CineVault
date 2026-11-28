@@ -20,7 +20,7 @@ class PersonalStatsPanels extends StatelessWidget {
     if (library == null || !library.ready) return const SizedBox.shrink();
     final saved = context.watch<WatchlistProvider>().items;
     final state = library.state;
-    final stats = PersonalStats(state, saved);
+    final stats = context.read<PersonalInsights>().statistics(state, saved);
     final people = stats.people.values.toList()
       ..sort((a, b) => b.count.compareTo(a.count));
     final routeByGenre = <String, GenreRef>{};

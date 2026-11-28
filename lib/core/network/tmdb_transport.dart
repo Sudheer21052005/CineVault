@@ -29,8 +29,7 @@ class TmdbException implements Exception {
 
   @override
   String toString() => switch (kind) {
-    TmdbErrorKind.configuration =>
-      'Add your TMDB API key to the local .env file.',
+    TmdbErrorKind.configuration => 'TMDB is unconfigured. Run with --dart-define-from-file=.env for live catalogue access.',
     TmdbErrorKind.unauthorized => 'TMDB rejected the configured credentials.',
     TmdbErrorKind.notFound => 'This title could not be found.',
     TmdbErrorKind.rateLimited => 'TMDB is busy. Please try again shortly.',

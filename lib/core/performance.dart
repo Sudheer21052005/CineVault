@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:ui' show FramePhase;
 
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/foundation.dart' show debugPrintSynchronously;
 
 import 'performance_marks_stub.dart'
     if (dart.library.js_interop) 'performance_marks_web.dart';
@@ -97,11 +99,16 @@ class AppPerformance {
   AppPerformance({this._sink});
 
   static const enabled = bool.fromEnvironment('CINEVAULT_PERF');
+  static const logSamples = bool.fromEnvironment('CINEVAULT_PERF_OUTPUT');
   final void Function(PerfSample)? _sink;
-  bool get collecting => enabled || _sink != null;
+  bool get collecting => enabled || logSamples || _sink != null;
 
   void record(PerfSample sample) {
     _sink?.call(sample);
+    if (logSamples && sample.event != PerfEvent.artworkReady) {
+      // Keep transport tools responsive during image-heavy scroll captures.
+      debugPrintSynchronously('CINEVAULT_PERF ${jsonEncode(sample.fields)}');
+    }
     if (enabled) {
       final name = 'cinevault.${sample.event.name}';
       final fields = sample.fields;

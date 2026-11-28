@@ -1,4 +1,3 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -20,11 +19,14 @@ void main() {
     ..maximumSize = 180
     ..maximumSizeBytes = 64 * 1024 * 1024;
   Future<void>? hiveStart;
-  Future<void> initializeHive() => hiveStart ??= Hive.initFlutter();
+  // The optional path isolates native verification from the installed library.
+  const storage = String.fromEnvironment('CINEVAULT_QA_STORAGE');
+  Future<void> initializeHive() =>
+      hiveStart ??= Hive.initFlutter(storage.isEmpty ? null : storage);
   final performance = AppPerformance();
   final catalogue = CatalogueRepository(
     TmdbTransport(
-      credential: _credential(),
+      credential: () async => const String.fromEnvironment('TMDB_API_KEY'),
       performance: performance,
       durableCache: HiveCatalogueCache(
         initialize: initializeHive,
@@ -45,18 +47,4 @@ void main() {
       personal: PersonalLibrary(HivePersonalStore(initialize: initializeHive)),
     ),
   );
-}
-
-Future<String> Function() _credential() {
-  Future<String>? value;
-  return () => value ??= _loadCredential();
-}
-
-Future<String> _loadCredential() async {
-  try {
-    await dotenv.load(fileName: '.env', isOptional: true);
-    return dotenv.env['TMDB_API_KEY'] ?? '';
-  } catch (_) {
-    return '';
-  }
 }

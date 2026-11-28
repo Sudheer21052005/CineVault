@@ -165,7 +165,7 @@ class _ContentBadge extends StatelessWidget {
   );
 }
 
-class PagedBrowseView<T extends CatalogueItem> extends StatelessWidget {
+class PagedBrowseView<T extends CatalogueItem> extends StatefulWidget {
   const PagedBrowseView({
     required this.pages,
     required this.header,
@@ -192,35 +192,52 @@ class PagedBrowseView<T extends CatalogueItem> extends StatelessWidget {
   final bool refresh;
 
   @override
+  State<PagedBrowseView<T>> createState() => _PagedBrowseViewState<T>();
+}
+
+class _PagedBrowseViewState<T extends CatalogueItem>
+    extends State<PagedBrowseView<T>> {
+  bool _nextScheduled = false;
+
+  @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: pages,
+    listenable: widget.pages,
     builder: (context, _) {
+      final pages = widget.pages;
       final state = pages.state;
       if ((state.status == PageStatus.ready ||
               state.status == PageStatus.failed) &&
-          onFirstPaint != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => onFirstPaint!());
+          widget.onFirstPaint != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.onFirstPaint?.call();
+        });
       }
       return NotificationListener<ScrollNotification>(
         onNotification: (event) {
           if (event.depth == 0 &&
               (event is ScrollUpdateNotification ||
                   event is ScrollEndNotification) &&
-              event.metrics.extentAfter < 600) {
+              event.metrics.extentAfter < 600 &&
+              !_nextScheduled &&
+              pages.canLoadNext()) {
+            _nextScheduled = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (context.mounted) unawaited(pages.loadNext());
+              _nextScheduled = false;
+              if (mounted && identical(widget.pages, pages)) {
+                unawaited(pages.loadNext());
+              }
             });
           }
           return false;
         },
         child: CinePage(
-          controller: scroll,
-          scrollKey: scrollKey,
-          onRefresh: refresh ? pages.refresh : null,
+          controller: widget.scroll,
+          scrollKey: widget.scrollKey,
+          onRefresh: widget.refresh ? pages.refresh : null,
           slivers: [
-            CineSliver(top: 24, bottom: 26, child: header),
-            if (state.status == PageStatus.idle && idle != null)
-              CineSliver(child: idle!),
+            CineSliver(top: 24, bottom: 26, child: widget.header),
+            if (state.status == PageStatus.idle && widget.idle != null)
+              CineSliver(child: widget.idle!),
             if (state.error != null)
               CineSliver(
                 bottom: 18,
@@ -231,16 +248,14 @@ class PagedBrowseView<T extends CatalogueItem> extends StatelessWidget {
                 ),
               ),
             if (state.status == PageStatus.loading)
-              PosterGrid(heroPrefix: heroPrefix, skeletons: 14)
+              PosterGrid(heroPrefix: widget.heroPrefix, skeletons: 14)
             else if (state.items.isNotEmpty)
-              results(state.items)
+              widget.results(state.items)
             else if (state.status == PageStatus.ready)
-              CineSliver(child: MessageState(message: emptyMessage)),
+              CineSliver(child: MessageState(message: widget.emptyMessage)),
             if (state.loadingNext ||
                 state.nextError != null ||
-                (state.hasMore &&
-                    state.items.isEmpty &&
-                    state.status == PageStatus.ready))
+                pages.canLoadNext())
               CineSliver(
                 top: 18,
                 child: Center(child: nextPageAction(pages, state)),
@@ -292,26 +307,32 @@ class CatalogueGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     const gap = 14.0;
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final gutter = CineLayout.gutterOf(context);
+    final viewport = CineViewport.maybeWidthOf(context);
+    Widget grid(double extent) {
+      final columns = cineColumns(extent, scale);
+      final width = (extent - (columns - 1) * gap) / columns;
+      return SliverGrid.builder(
+        itemCount: count,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
+          crossAxisSpacing: gap,
+          mainAxisSpacing: 10,
+          mainAxisExtent: cineCardHeight(width, scale) + extraHeight * scale,
+        ),
+        itemBuilder: itemBuilder,
+      );
+    }
+
     return SliverPadding(
-      padding: EdgeInsets.symmetric(horizontal: CineLayout.gutterOf(context)),
-      sliver: SliverLayoutBuilder(
-        builder: (context, constraints) {
-          final extent = constraints.crossAxisExtent;
-          final columns = cineColumns(extent, scale);
-          final width = (extent - (columns - 1) * gap) / columns;
-          return SliverGrid.builder(
-            itemCount: count,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              crossAxisSpacing: gap,
-              mainAxisSpacing: 10,
-              mainAxisExtent:
-                  cineCardHeight(width, scale) + extraHeight * scale,
-            ),
-            itemBuilder: itemBuilder,
-          );
-        },
-      ),
+      padding: EdgeInsets.symmetric(horizontal: gutter),
+      // Sliver constraints include scroll position. Use the stable box width
+      // so the visible delegate can retain its children between scroll frames.
+      sliver: viewport == null
+          ? SliverLayoutBuilder(
+              builder: (_, constraints) => grid(constraints.crossAxisExtent),
+            )
+          : grid((viewport - 2 * gutter).clamp(0.0, double.infinity)),
     );
   }
 }

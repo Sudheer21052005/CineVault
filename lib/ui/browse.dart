@@ -852,6 +852,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
   @override
   Widget build(BuildContext context) => PagedBrowseView(
     pages: _pages,
+    scrollKey: PageStorageKey('discovery-${widget.title}'),
     results: (items) => PosterGrid(heroPrefix: widget.title, items: items),
     heroPrefix: widget.title,
     emptyMessage: 'No titles available.',
