@@ -57,6 +57,15 @@ class WatchlistProvider extends ChangeNotifier {
     _notify();
   }
 
+  Future<void> mergeBackup(LibrarySnapshot snapshot) async {
+    await initialize();
+    try {
+      await _library.mergeBackup(snapshot);
+    } finally {
+      _notify();
+    }
+  }
+
   void _notify() {
     if (_disposed) return;
     _items = _library.items;

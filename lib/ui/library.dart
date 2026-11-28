@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../app/navigation_scope.dart';
 import '../app/route_contract.dart';
+import '../library/personal_library.dart';
+import 'personal_stats.dart';
 import '../core/material.dart';
 import '../models/media.dart';
 import '../models/watchlist_item.dart';
@@ -366,6 +368,16 @@ class _WatchlistPageState extends State<WatchlistPage> {
             action: Wrap(
               spacing: 6,
               children: [
+                if (context.watch<PersonalLibrary?>() != null)
+                  FilledButton.tonalIcon(
+                    onPressed: () => CineNavigation.of(context).open(
+                      context,
+                      const PersonalRoute(),
+                      label: 'Personal library',
+                    ),
+                    icon: const Icon(Icons.auto_stories_outlined, size: 18),
+                    label: const Text('Personal library'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: () =>
                       CineNavigation.of(context).select(context, AppTab.stats),
@@ -616,6 +628,7 @@ class StatisticsPage extends StatelessWidget {
           CineSliver(bottom: 18, child: _Totals(library: library)),
           CineSliver(bottom: 18, child: _StatsPanels(library: library)),
           CineSliver(child: _AchievementPanel(library: library)),
+          const CineSliver(top: 20, child: PersonalStatsPanels()),
         ],
       ],
     );

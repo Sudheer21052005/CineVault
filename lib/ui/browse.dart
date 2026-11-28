@@ -12,7 +12,7 @@ import '../catalogue/entity_ref.dart';
 import '../catalogue/paged_controller.dart';
 import '../core/material.dart';
 import '../models/media.dart';
-import '../providers/watchlist_provider.dart';
+import 'personal_home.dart';
 import 'artwork.dart';
 import 'catalogue_widgets.dart';
 import 'design_system.dart';
@@ -60,8 +60,8 @@ class _HomePageState extends State<HomePage> {
         sliver: SliverList.builder(
           itemCount: _feeds.length + 1,
           itemBuilder: (context, index) {
-            if (index == _feeds.length) return const _PersonalShelf();
-            final feed = _feeds.keys.elementAt(index);
+            if (index == 1) return const PersonalHome();
+            final feed = _feeds.keys.elementAt(index == 0 ? 0 : index - 1);
             return Padding(
               padding: const EdgeInsets.only(bottom: 24),
               child: FeedShelf(key: _feeds[feed], feed: feed),
@@ -863,51 +863,5 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         CineHeading(widget.title, subtitle: widget.subtitle),
       ],
     ),
-  );
-}
-
-class _PersonalShelf extends StatefulWidget {
-  const _PersonalShelf();
-  @override
-  State<_PersonalShelf> createState() => _PersonalShelfState();
-}
-
-class _PersonalShelfState extends State<_PersonalShelf> {
-  String? _key;
-  Future<List<Media>>? _request;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final provider = context.watch<WatchlistProvider>();
-    final first = provider.items.firstOrNull;
-    if (first?.key == _key) return;
-    _key = first?.key;
-    final kind = MediaKind.parse(first?.type);
-    _request = first == null || kind == null
-        ? null
-        : context.read<CatalogueRepository>().related((
-            kind: kind.entityKind,
-            id: first.id,
-          ));
-  }
-
-  @override
-  Widget build(BuildContext context) => FutureBuilder<List<Media>>(
-    future: _request,
-    builder: (context, snapshot) {
-      final library = context.read<WatchlistProvider>();
-      final matches = (snapshot.data ?? const <Media>[])
-          .where((item) => library.find(item.id, item.type) == null)
-          .take(8)
-          .toList();
-      return matches.isEmpty
-          ? const SizedBox.shrink()
-          : PosterShelf(
-              title: 'Picked for your watchlist',
-              shelfId: 'personal',
-              items: matches,
-            );
-    },
   );
 }

@@ -10,10 +10,12 @@ import '../catalogue/entity_ref.dart';
 import '../core/material.dart';
 import '../core/performance.dart';
 import '../models/media.dart';
+import '../library/personal_library.dart';
 import '../providers/watchlist_provider.dart';
 import '../ui/about.dart';
 import '../ui/entities.dart';
 import '../ui/episodes.dart';
+import '../ui/personal_page.dart';
 import '../ui/graph_widgets.dart' show entityLabel;
 import 'browser_back_stub.dart'
     if (dart.library.js_interop) 'browser_back_web.dart';
@@ -27,6 +29,7 @@ class CineVaultApp extends StatefulWidget {
     required this.watchlist,
     required this.performance,
     required this.startupWatch,
+    this.personal,
     super.key,
   });
 
@@ -34,6 +37,7 @@ class CineVaultApp extends StatefulWidget {
   final WatchlistProvider watchlist;
   final AppPerformance performance;
   final Stopwatch startupWatch;
+  final PersonalLibrary? personal;
 
   @override
   State<CineVaultApp> createState() => _CineVaultAppState();
@@ -63,6 +67,7 @@ class _CineVaultAppState extends State<CineVaultApp> {
         PerfSample(PerfEvent.startupFirstFrame, widget.startupWatch.elapsed),
       );
       widget.watchlist.initialize();
+      widget.personal?.initialize();
     });
   }
 
@@ -82,6 +87,8 @@ class _CineVaultAppState extends State<CineVaultApp> {
         create: (_) => ArtworkPolicy(widget.catalogue.transport),
       ),
       ChangeNotifierProvider.value(value: widget.watchlist),
+      if (widget.personal != null)
+        ChangeNotifierProvider.value(value: widget.personal!),
     ],
     child: MaterialApp.router(
       debugShowCheckedModeBanner: false,
@@ -228,7 +235,10 @@ class _CineRouter extends RouterDelegate<_Location>
   List<_Entry> _stackFor(CineRoute route) => route is TabRoute
       ? [_Entry(++_serial, route)]
       : [
-          _Entry(++_serial, const TabRoute(AppTab.home)),
+          _Entry(
+            ++_serial,
+            TabRoute(route is PersonalRoute ? AppTab.watchlist : AppTab.home),
+          ),
           _Entry(++_serial, route, direct: true),
         ];
 
@@ -526,6 +536,7 @@ class _CineRouter extends RouterDelegate<_Location>
         final SeasonRoute route => SeasonPage(ref: route.ref),
         final EpisodeRoute route => EpisodePage(ref: route.ref),
         final GenreRoute route => GenrePage(ref: route.ref),
+        final PersonalRoute route => PersonalPage(view: route.view),
         _ => Scaffold(
           appBar: AppBar(
             title: const Text('Explore'),

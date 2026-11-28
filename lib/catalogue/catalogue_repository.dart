@@ -496,6 +496,27 @@ class CatalogueRepository {
     return result.items;
   }
 
+  Future<List<Media>> upcomingFor({int? person, int? genre}) async {
+    if (person == null && genre == null) return const [];
+    final today = _now();
+    final page = await _page(
+      '/discover/movie',
+      PerfArea.releaseFeed,
+      1,
+      kind: MediaKind.movie,
+      query: {
+        'include_adult': 'false',
+        'sort_by': 'primary_release_date.asc',
+        'primary_release_date.gte': _date(today),
+        'primary_release_date.lte': _date(today.add(const Duration(days: 120))),
+        if (person != null) 'with_people': '$person',
+        if (genre != null) 'with_genres': '$genre',
+      },
+      refresh: false,
+    );
+    return page.items;
+  }
+
   Future<TmdbPage> _page(
     String path,
     PerfArea operation,

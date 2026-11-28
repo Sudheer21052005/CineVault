@@ -10,11 +10,14 @@ import '../catalogue/entity_ref.dart';
 import '../catalogue/knowledge_models.dart';
 import '../core/material.dart';
 import '../models/media.dart';
+import '../library/personal_models.dart';
+import '../library/personal_library.dart';
 import 'artwork.dart';
 import 'catalogue_widgets.dart';
 import 'design_system.dart';
 import 'library.dart';
 import 'media_sections.dart';
+import 'personal_actions.dart';
 
 class MediaDetailsPage extends StatefulWidget {
   const MediaDetailsPage({
@@ -88,6 +91,16 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
                   message: catalogueError(snapshot.error),
                   onRetry: () =>
                       setState(() => _request = _fetch(refresh: true)),
+                ),
+              ),
+            if (item != null &&
+                context.watch<PersonalLibrary?>()?.ready == true)
+              CineSliver(
+                bottom: 15,
+                child: PersonalActions(
+                  key: ValueKey(item.key),
+                  title: PersonalTitle.media(item, data: knowledge?.data),
+                  details: knowledge,
                 ),
               ),
             if (item != null)

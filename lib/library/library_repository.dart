@@ -118,6 +118,21 @@ class LibraryRepository {
     if (!ready) throw StateError('The watchlist is not available.');
   }
 
+  Future<void> mergeBackup(LibrarySnapshot snapshot) => _serialize(() async {
+    _requireReady();
+    for (final item in snapshot.items) {
+      if (_items.containsKey(item.key)) continue;
+      await _store.put(item);
+      _items[item.key] = item;
+    }
+    for (final id in snapshot.achievements) {
+      if (_achievements.contains(id)) continue;
+      await _store.unlock(id);
+      _achievements.add(id);
+    }
+    await _reconcileAchievements();
+  });
+
   Future<void> _reconcileAchievements() async {
     final watched = _items.values
         .where((item) => item.status == WatchStatus.watched)

@@ -9,11 +9,13 @@ import '../catalogue/knowledge_models.dart';
 import '../catalogue/paged_controller.dart';
 import '../core/material.dart';
 import '../models/media.dart';
+import '../library/personal_models.dart';
 import 'artwork.dart';
 import 'catalogue_widgets.dart';
 import 'design_system.dart';
 import 'graph_widgets.dart';
 import 'media_sections.dart';
+import 'personal_actions.dart';
 
 class PersonPage extends StatelessWidget {
   const PersonPage({required this.ref, super.key});
@@ -40,6 +42,13 @@ class PersonPage extends StatelessWidget {
                 artKind: ArtworkKind.profile,
                 subtitle: text(person['known_for_department']),
                 actions: [
+                  PersonalActions(
+                    title: PersonalTitle(
+                      TitleRoute(ref),
+                      name,
+                      image: text(person['profile_path']),
+                    ),
+                  ),
                   GraphLink(
                     'Full filmography',
                     FilmographyRoute(ref.id),
@@ -528,6 +537,13 @@ class CatalogueEntityPage extends StatelessWidget {
             ?text(data['origin_country']),
           ], separator: ' · '),
           actions: [
+            PersonalActions(
+              title: PersonalTitle(
+                TitleRoute(ref),
+                name,
+                image: text(data['poster_path']) ?? text(data['logo_path']),
+              ),
+            ),
             if (website(data['homepage']) case final url?)
               ExternalLink('Official site', url),
             ExternalLink(

@@ -25,6 +25,17 @@ sealed class CineRoute {
   PerfArea get area;
 }
 
+enum PersonalView { diary, progress, favorites, lists, recent, data }
+
+class PersonalRoute extends CineRoute {
+  const PersonalRoute([this.view = PersonalView.diary]);
+  final PersonalView view;
+  @override
+  Uri get uri => Uri(path: '/library/personal/${view.name}');
+  @override
+  PerfArea get area => PerfArea.library;
+}
+
 class TabRoute extends CineRoute {
   const TabRoute(
     this.tab, {
@@ -190,6 +201,13 @@ CineRoute parseCineRoute(Uri uri) {
   }
   final segments = uri.pathSegments;
   switch (segments) {
+    case ['library', 'personal']:
+      return const PersonalRoute();
+    case ['library', 'personal', final name]:
+      final view = PersonalView.values
+          .where((value) => value.name == name)
+          .firstOrNull;
+      if (view != null) return PersonalRoute(view);
     case ['discover', 'feed', final name]:
       final feed = CatalogueFeed.values
           .where((feed) => feed.name == name)

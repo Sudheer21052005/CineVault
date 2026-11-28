@@ -10,6 +10,7 @@ import 'core/network/catalogue_cache.dart';
 import 'core/performance.dart';
 import 'library/hive_library_store.dart';
 import 'library/library_repository.dart';
+import 'library/personal_library.dart';
 import 'providers/watchlist_provider.dart';
 
 void main() {
@@ -41,6 +42,7 @@ void main() {
       watchlist: watchlist,
       performance: performance,
       startupWatch: startup,
+      personal: PersonalLibrary(HivePersonalStore(initialize: initializeHive)),
     ),
   );
 }

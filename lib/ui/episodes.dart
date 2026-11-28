@@ -7,10 +7,13 @@ import '../catalogue/catalogue_repository.dart';
 import '../catalogue/entity_ref.dart';
 import '../catalogue/knowledge_models.dart';
 import '../core/material.dart';
+import '../library/personal_library.dart';
+import '../library/personal_models.dart';
 import 'artwork.dart';
 import 'design_system.dart';
 import 'graph_widgets.dart';
 import 'media_sections.dart';
+import 'personal_actions.dart';
 
 String _seasonLabel(int season) => season == 0 ? 'Specials' : 'Season $season';
 
@@ -45,6 +48,27 @@ class SeasonPage extends StatelessWidget {
                   ?text(data['air_date']),
                 ], separator: ' · '),
                 actions: [
+                  if (context.watch<PersonalLibrary?>()?.ready == true)
+                    OutlinedButton(
+                      child: const Text('Save season schedule'),
+                      onPressed: () async {
+                        final library = context.read<PersonalLibrary>();
+                        final title = await _seriesTitle(repo, library, series);
+                        if (context.mounted) {
+                          await personalWrite(
+                            context,
+                            library.saveSeason(
+                              seasonFromJson(
+                                title,
+                                ref.seriesId,
+                                ref.seasonNumber,
+                                data,
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                    ),
                   GraphLink(
                     'View series',
                     TitleRoute(series),
@@ -222,6 +246,8 @@ class EpisodePage extends StatelessWidget {
                 ?_rating(data),
               ], separator: ' · '),
               actions: [
+                EpisodeWatchAction(PersonalTitle.episode(ref, data)),
+                PersonalActions(title: PersonalTitle.episode(ref, data)),
                 GraphLink(
                   _seasonLabel(ref.seasonNumber),
                   SeasonRoute(season),
@@ -306,6 +332,24 @@ class EpisodePage extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+Future<PersonalTitle> _seriesTitle(
+  CatalogueRepository repo,
+  PersonalLibrary library,
+  EntityRef ref,
+) async {
+  final known = library.state.seasons.values
+      .where((season) => season.series.key == '/tv/${ref.id}')
+      .firstOrNull
+      ?.series;
+  if (known != null) return known;
+  try {
+    final title = await repo.titleKnowledge(ref);
+    return PersonalTitle.media(title.media, data: title.data);
+  } catch (_) {
+    return PersonalTitle(TitleRoute(ref), 'Series ${ref.id}');
   }
 }
 
