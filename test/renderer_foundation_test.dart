@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:cinevault/catalogue/artwork_policy.dart';
+import 'package:cinevault/core/material.dart';
 import 'package:cinevault/core/network/catalogue_cache.dart';
 import 'package:cinevault/core/network/tmdb_transport.dart';
 import 'package:cinevault/core/performance.dart';
+import 'package:cinevault/ui/catalogue_widgets.dart';
 import 'package:cinevault/ui/design_system.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
@@ -39,6 +41,39 @@ void main() {
     expect(cineColumns(1140, 1), 7);
     expect(cineCardHeight(140, 2), greaterThan(cineCardHeight(140, 1)));
   });
+
+  testWidgets(
+    'scrolling within a row keeps the mounted poster builders stable',
+    (tester) async {
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
+      var builds = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CinePage(
+            controller: controller,
+            slivers: [
+              CatalogueGrid(
+                count: 100,
+                itemBuilder: (_, index) {
+                  builds++;
+                  return Text('Poster $index');
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      final firstLayout = builds;
+      expect(firstLayout, inInclusiveRange(1, 99));
+      controller.jumpTo(2);
+      await tester.pump();
+      expect(builds, firstLayout);
+      controller.jumpTo(650);
+      await tester.pump();
+      expect(builds, greaterThan(firstLayout));
+    },
+  );
 
   test('selects artwork variants by logical width, caps DPR and honors TMDB configuration', () async {
     final client = MockClient((request) async {

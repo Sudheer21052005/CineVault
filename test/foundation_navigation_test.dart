@@ -15,6 +15,24 @@ import 'support/memory_library_store.dart';
 import 'support/tmdb_fixture.dart';
 
 void main() {
+  testWidgets('desktop navigation remains exposed beside a nested route', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      await _mount(tester);
+      expect(find.bySemanticsLabel('About CineVault'), findsOneWidget);
+      await tester.tap(find.text('Now Playing').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Inception').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Runtime: 148 minutes'), findsOneWidget);
+      expect(find.bySemanticsLabel('About CineVault'), findsOneWidget);
+    } finally {
+      semantics.dispose();
+    }
+  });
+
   test(
     'route contract validates IDs and round trips nested entity/discovery URLs',
     () {

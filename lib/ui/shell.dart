@@ -132,7 +132,13 @@ class ResponsiveShell extends StatelessWidget {
                         context: context,
                         removeTop: !covered || !mobile,
                         removeBottom: mobile && !covered,
-                        child: child,
+                        // Navigator route barriers must not hide the persistent
+                        // navigation controls from the accessibility tree.
+                        child: Semantics(
+                          container: true,
+                          explicitChildNodes: true,
+                          child: child,
+                        ),
                       ),
                     ),
                   ],
@@ -502,6 +508,7 @@ class _NavButton extends StatelessWidget {
       ),
     );
     return Semantics(
+      container: true,
       selected: selected,
       button: true,
       label: label,
