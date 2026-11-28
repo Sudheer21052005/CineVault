@@ -118,7 +118,7 @@ class FilmographyRoute extends CineRoute {
       if (genre != null) 'genre': '${genre.kind.name}:${genre.id}',
       if (filter.year != null) 'year': '${filter.year}',
       if (filter.minimumVotes > 0) 'votes': '${filter.minimumVotes}',
-      if (filter.sort != FilmSort.popularity) 'sort': filter.sort.name,
+      if (filter.sort != FilmSort.relevance) 'sort': filter.sort.name,
     };
     return Uri(
       path: '/person/$personId/filmography',
@@ -254,7 +254,7 @@ CineRoute parseCineRoute(Uri uri) {
                 FilmSort.values
                     .where((sort) => sort.name == params['sort'])
                     .firstOrNull ??
-                FilmSort.popularity,
+                FilmSort.relevance,
           ),
         );
       }

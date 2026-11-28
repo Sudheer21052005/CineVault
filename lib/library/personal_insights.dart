@@ -245,11 +245,9 @@ class PersonalDiscovery {
     final ref = (source.title.route as TitleRoute).ref;
     try {
       return switch (ref.kind) {
-        EntityKind.person =>
-          const FilmographyFilter()
-              .apply(readFilmography(await repo.filmography(ref.id)) ?? [])
-              .map((credit) => credit.title)
-              .toList(),
+        EntityKind.person => _popularPersonTitles(
+          await repo.filmography(ref.id),
+        ),
         EntityKind.collection => [
           for (final row in objects((await repo.entity(ref))['parts']))
             if (row['adult'] != true && (integer(row['id']) ?? 0) > 0)
@@ -261,6 +259,17 @@ class PersonalDiscovery {
       return const [];
     }
   }
+
+  List<Media> _popularPersonTitles(Json data) =>
+      [
+        for (final credit in readFilmography(data) ?? const <FilmCredit>[])
+          credit.title,
+      ]..sort((a, b) {
+        final popularity = b.popularity.compareTo(a.popularity);
+        if (popularity != 0) return popularity;
+        final name = a.title.toLowerCase().compareTo(b.title.toLowerCase());
+        return name == 0 ? a.key.compareTo(b.key) : name;
+      });
 
   Future<List<UpcomingPick>> upcoming(
     PersonalState state,

@@ -244,6 +244,18 @@ class _FilmographyView extends StatefulWidget {
 class _FilmographyViewState extends State<_FilmographyView> {
   final _scroll = ScrollController();
   late final _genres = _loadGenres();
+  bool? _gridPreference;
+  bool _restoredView = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_restoredView) return;
+    _restoredView = true;
+    final saved = PageStorage.maybeOf(context)
+        ?.readState(context, identifier: 'filmography-grid-view');
+    if (saved is bool) _gridPreference = saved;
+  }
 
   Future<List<(GenreRef, String)>> _loadGenres() async {
     final repo = context.read<CatalogueRepository>();
@@ -278,9 +290,12 @@ class _FilmographyViewState extends State<_FilmographyView> {
   Widget build(BuildContext context) {
     final filter = widget.route.filter;
     final all = widget.credits;
+    final department = text(widget.person['known_for_department']);
+    final grid =
+        _gridPreference ?? (CineLayout.widthOf(context) != CineWidth.compact);
     final visible = all == null
         ? const <FilmCredit>[]
-        : filter.apply(all).toList();
+        : filter.apply(all, department: department).toList();
     final name = text(widget.person['name']) ?? 'Person';
     final person = (kind: EntityKind.person, id: widget.route.personId);
     final roles = <String>{
@@ -438,7 +453,7 @@ class _FilmographyViewState extends State<_FilmographyView> {
                         genre: filter.genre,
                         year: filter.year,
                         minimumVotes: filter.minimumVotes,
-                        sort: sort ?? FilmSort.popularity,
+                        sort: sort ?? FilmSort.relevance,
                       ),
                     ),
                   ),
@@ -447,6 +462,30 @@ class _FilmographyViewState extends State<_FilmographyView> {
                   TextButton(
                     onPressed: () => _select(const FilmographyFilter()),
                     child: const Text('Clear filters'),
+                  ),
+                  SegmentedButton<bool>(
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(
+                        value: true,
+                        label: Text('Grid'),
+                        icon: Icon(Icons.grid_view_rounded),
+                      ),
+                      ButtonSegment(
+                        value: false,
+                        label: Text('List'),
+                        icon: Icon(Icons.view_list_rounded),
+                      ),
+                    ],
+                    selected: {grid},
+                    onSelectionChanged: (selection) {
+                      setState(() => _gridPreference = selection.single);
+                      PageStorage.maybeOf(context)?.writeState(
+                        context,
+                        _gridPreference,
+                        identifier: 'filmography-grid-view',
+                      );
+                    },
                   ),
                 ],
               ),
@@ -463,7 +502,25 @@ class _FilmographyViewState extends State<_FilmographyView> {
                   : 'No credits match these filters.',
             ),
           ),
-        if (visible.isNotEmpty)
+        if (visible.isNotEmpty && grid)
+          CatalogueGrid(
+            count: visible.length,
+            extraHeight: 40,
+            itemBuilder: (_, index) {
+              final credit = visible[index];
+              final role = filter.primaryRole(credit, department: department);
+              return PosterCard(
+                key: ValueKey(credit.title.key),
+                media: credit.title,
+                heroTag:
+                    'filmography-${widget.route.personId}-${credit.title.key}',
+                creditRole: role == null
+                    ? 'Role unavailable'
+                    : creditLabel(role),
+              );
+            },
+          ),
+        if (visible.isNotEmpty && !grid)
           SliverPadding(
             padding: EdgeInsets.symmetric(
               horizontal: CineLayout.gutterOf(context),
