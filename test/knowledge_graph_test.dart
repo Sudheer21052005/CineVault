@@ -170,6 +170,13 @@ void main() {
     );
     final route = parseCineRoute(uri) as FilmographyRoute;
     expect(route.uri, uri);
+    expect(const FilmographyRoute(525).filter.sort, FilmSort.relevance);
+    final popularity = Uri.parse('/person/525/filmography?sort=popularity');
+    expect(
+      (parseCineRoute(popularity) as FilmographyRoute).filter.sort,
+      FilmSort.popularity,
+    );
+    expect(parseCineRoute(popularity).uri, popularity);
     expect(route.filter.minimumVotes, 500);
     expect(
       (parseCineRoute(
@@ -278,7 +285,7 @@ void main() {
       expect(find.text('Biography'), findsOneWidget);
       await _tap(tester, 'Full filmography');
       expect(find.text('Filmography'), findsOneWidget);
-      await _tap(tester, 'Popularity');
+      await _tap(tester, 'Relevance');
       await _tap(tester, 'Highest rated', last: true);
       expect(find.text('Highest rated'), findsOneWidget);
       await _tap(tester, 'The Dark Knight');
@@ -373,7 +380,11 @@ void main() {
           },
         ],
       })!;
-      expect(const FilmographyFilter().apply(films).first.title.id, 1);
+      for (final sort in [FilmSort.relevance, FilmSort.popularity]) {
+        final ranked = FilmographyFilter(sort: sort)
+            .apply(films, department: 'Acting');
+        expect(ranked.map((row) => row.title.id), [2, 3, 1]);
+      }
       expect(
         rankKnownFor(films, department: 'Acting').map((row) => row.title.id),
         [2, 3, 1],
@@ -388,6 +399,40 @@ void main() {
       );
     },
   );
+
+  testWidgets('filmography shares filters and sorting between grid and list', (
+    tester,
+  ) async {
+    await _Harness().mount(tester, '/person/525/filmography');
+    final toggle = find.byType(SegmentedButton<bool>);
+    expect(tester.widget<SegmentedButton<bool>>(toggle).selected, {true});
+    expect(find.text('Relevance'), findsOneWidget);
+    await _tap(tester, 'All roles');
+    await _tap(tester, 'Director', last: true);
+    expect(find.text('1 of 3 credited titles'), findsOneWidget);
+    final card = find.byKey(const ValueKey('movie-155'));
+    expect(card, findsOneWidget);
+    expect(
+      find.descendant(of: card, matching: find.text('Director')),
+      findsOneWidget,
+    );
+    await _tap(tester, 'List');
+    expect(tester.widget<SegmentedButton<bool>>(toggle).selected, {false});
+    expect(card, findsNothing);
+    expect(find.textContaining('Self · Director · Writer'), findsOneWidget);
+    await _tap(tester, 'Relevance');
+    await _tap(tester, 'Popularity', last: true);
+    expect(tester.widget<SegmentedButton<bool>>(toggle).selected, {false});
+    await _tap(tester, 'The Dark Knight');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(tester.widget<SegmentedButton<bool>>(toggle).selected, {false});
+    expect(find.text('1 of 3 credited titles'), findsOneWidget);
+    await _tap(tester, 'Grid');
+    expect(card, findsOneWidget);
+    expect(find.text('Popularity'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'pinned tabs stay fixed when a short reviews section loads and restore Overview offset',

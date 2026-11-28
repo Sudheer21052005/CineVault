@@ -191,58 +191,10 @@ List<FilmCredit> rankKnownFor(
   String? department,
   Set<EntityRef> featured = const {},
 }) {
-  final profession = department?.toLowerCase();
-  final incidentalRole = RegExp(
-    r'\b(self|uncredited|archive footage)\b',
-    caseSensitive: false,
-  );
-  double relevance(FilmCredit credit) {
-    final title = credit.title;
-    final talk =
-        title.genreIds.contains(10767) || title.genreIds.contains(10763);
-    var strongest = double.negativeInfinity;
-    for (final role in credit.roles) {
-      final job = role.role.toLowerCase();
-      final episodes = math.max(0, role.episodes ?? 0);
-      final incidental = incidentalRole.hasMatch(job);
-      final aligned =
-          profession ==
-              (role.cast ? 'acting' : role.department?.toLowerCase()) &&
-          profession != null;
-      final billing = role.billing;
-      final prominence = role.cast
-          ? (billing != null && billing >= 0 ? 28 / (1 + billing / 4) : 9.0)
-          : switch (job) {
-              'director' ||
-              'creator' ||
-              'screenplay' ||
-              'writer' ||
-              'original music composer' => 24.0,
-              'producer' ||
-              'executive producer' ||
-              'director of photography' ||
-              'editor' => 16.0,
-              _ => 6.0,
-            };
-      final recurring = title.isMovie
-          ? 0.0
-          : math.min(31.0, math.log(episodes + 1) * 8);
-      final penalty =
-          (incidental ? 23 : 0) +
-          (talk ? 24 : 0) +
-          (!title.isMovie && episodes == 1 ? 8 : 0);
-      strongest = math.max(
-        strongest,
-        prominence + recurring + (aligned ? 8 : 0) - penalty,
-      );
-    }
-    final votes = math.max(0, title.voteCount);
-    return strongest +
-        (featured.contains(title.ref) ? 20 : 0) +
-        math.min(12, math.log(1 + math.max(0, title.popularity)) * 2) +
-        math.min(10, math.log(1 + votes)) +
-        (title.rating - 5) * 3 * votes / (votes + 120);
-  }
+  double relevance(FilmCredit credit) =>
+      _strongestContribution(credit, department, knownFor: true) +
+      _titleAttention(credit.title) +
+      (featured.contains(credit.title.ref) ? 20 : 0);
 
   final scored = [
     for (final credit in credits) (credit: credit, score: relevance(credit)),
@@ -254,6 +206,78 @@ List<FilmCredit> rankKnownFor(
         : a.credit.title.key.compareTo(b.credit.title.key);
   });
   return [for (final row in scored) row.credit];
+}
+
+final _knownForIncidental = RegExp(
+  r'\b(self|uncredited|archive footage)\b',
+  caseSensitive: false,
+);
+final _incidentalCredit = RegExp(
+  r'^(self|himself|herself|themselves|guest|special guest|talk show guest|host)(?:$|[\s(/–-])|\b(uncredited|archive footage)\b',
+  caseSensitive: false,
+);
+
+double _roleContribution(
+  Media title,
+  CreditRole role,
+  String? department, {
+  bool knownFor = false,
+}) {
+  final job = role.role.toLowerCase();
+  final episodes = math.max(0, role.episodes ?? 0);
+  final incidental = (knownFor ? _knownForIncidental : _incidentalCredit)
+      .hasMatch(job);
+  final talk = title.genreIds.contains(10767) || title.genreIds.contains(10763);
+  final aligned =
+      department != null &&
+      department.toLowerCase() ==
+          (role.cast ? 'acting' : role.department?.toLowerCase());
+  final billing = role.billing;
+  final prominence = role.cast
+      ? (billing != null && billing >= 0 ? 28 / (1 + billing / 4) : 9.0)
+      : switch (job) {
+          'director' ||
+          'creator' ||
+          'screenplay' ||
+          'writer' ||
+          'original music composer' => 24.0,
+          'producer' ||
+          'executive producer' ||
+          'director of photography' ||
+          'editor' => 16.0,
+          _ => 6.0,
+        };
+  final recurring = title.isMovie || (!knownFor && (incidental || talk))
+      ? 0.0
+      : math.min(31.0, math.log(episodes + 1) * 8);
+  return prominence +
+      recurring +
+      (aligned ? 8 : 0) -
+      (incidental ? 23 : 0) -
+      (talk ? 24 : 0) -
+      (!title.isMovie && episodes == 1 ? 8 : 0);
+}
+
+double _strongestContribution(
+  FilmCredit credit,
+  String? department, {
+  bool knownFor = false,
+}) => credit.roles.fold(
+  double.negativeInfinity,
+  (best, role) => math.max(
+    best,
+    _roleContribution(credit.title, role, department, knownFor: knownFor),
+  ),
+);
+
+double _titleAttention(Media title, {bool emphasizePopularity = false}) {
+  final votes = math.max(0, title.voteCount);
+  final popularity = math.log(1 + math.max(0, title.popularity));
+  return (emphasizePopularity
+          ? math.min(30, popularity * 5)
+          : math.min(12, popularity * 2)) +
+      math.min(10, math.log(1 + votes)) +
+      (title.rating - 5) * 3 * votes / (votes + 120);
 }
 
 List<FilmCredit>? readFilmography(Json source) {
@@ -285,6 +309,7 @@ List<FilmCredit>? readFilmography(Json source) {
 }
 
 enum FilmSort {
+  relevance('Relevance'),
   popularity('Popularity'),
   topRated('Highest rated'),
   lowRated('Lowest rated'),
@@ -303,7 +328,7 @@ class FilmographyFilter {
     this.genre,
     this.year,
     this.minimumVotes = 0,
-    this.sort = FilmSort.popularity,
+    this.sort = FilmSort.relevance,
   });
 
   final MediaKind? kind;
@@ -313,28 +338,54 @@ class FilmographyFilter {
   final int minimumVotes;
   final FilmSort sort;
 
-  Iterable<FilmCredit> apply(List<FilmCredit> credits) {
+  bool matchesRole(CreditRole entry) => switch (role) {
+    null => true,
+    'cast' => entry.cast,
+    'crew' => !entry.cast,
+    final job => !entry.cast && entry.role == job,
+  };
+
+  CreditRole? primaryRole(FilmCredit credit, {String? department}) {
+    CreditRole? best;
+    var strongest = double.negativeInfinity;
+    for (final entry in credit.roles.where(matchesRole)) {
+      final score = _roleContribution(credit.title, entry, department);
+      if (score > strongest) {
+        best = entry;
+        strongest = score;
+      }
+    }
+    return best;
+  }
+
+  Iterable<FilmCredit> apply(List<FilmCredit> credits, {String? department}) {
     final filtered = credits.where((credit) {
       final title = credit.title;
       final scope = kind;
       final category = genre;
       return (scope == null || title.type == scope.name) &&
-          (role == null ||
-              credit.roles.any(
-                (entry) => switch (role) {
-                  'cast' => entry.cast,
-                  'crew' => !entry.cast,
-                  final job when job != null =>
-                    !entry.cast && entry.role == job,
-                  _ => true,
-                },
-              )) &&
+          (role == null || credit.roles.any(matchesRole)) &&
           (category == null ||
               (title.type == category.kind.name &&
                   title.genreIds.contains(category.id))) &&
           (year == null || title.releaseDate?.year == year) &&
           title.voteCount >= minimumVotes;
     }).toList();
+    final scores = <EntityRef, double>{};
+    if (sort == FilmSort.relevance || sort == FilmSort.popularity) {
+      for (final credit in filtered) {
+        final primary = primaryRole(credit, department: department);
+        final contribution = primary == null
+            ? 0.0
+            : _roleContribution(credit.title, primary, department);
+        scores[credit.title.ref] =
+            contribution +
+            _titleAttention(
+              credit.title,
+              emphasizePopularity: sort == FilmSort.popularity,
+            );
+      }
+    }
     int compareKnown<T extends Comparable<T>>(
       T? a,
       T? b, {
@@ -352,7 +403,8 @@ class FilmographyFilter {
       final a = left.title;
       final b = right.title;
       final result = switch (sort) {
-        FilmSort.popularity => b.popularity.compareTo(a.popularity),
+        FilmSort.relevance ||
+        FilmSort.popularity => scores[b.ref]!.compareTo(scores[a.ref]!),
         FilmSort.topRated => compareKnown<num>(
           rating(a),
           rating(b),

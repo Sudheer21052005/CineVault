@@ -18,9 +18,15 @@ String catalogueError(Object? error) => error is TmdbException
     : 'Unable to load catalogue data. Please retry.';
 
 class PosterCard extends StatefulWidget {
-  const PosterCard({required this.media, required this.heroTag, super.key});
+  const PosterCard({
+    required this.media,
+    required this.heroTag,
+    this.creditRole,
+    super.key,
+  });
   final Media media;
   final String heroTag;
+  final String? creditRole;
 
   @override
   State<PosterCard> createState() => _PosterCardState();
@@ -33,6 +39,10 @@ class _PosterCardState extends State<PosterCard> {
   @override
   Widget build(BuildContext context) {
     final media = widget.media;
+    final creditRole = widget.creditRole;
+    final year = creditRole == null
+        ? media.year
+        : '${media.isMovie ? 'Film' : 'TV'} · ${media.year}';
     final titleStyle = Theme.of(context).textTheme.titleMedium!;
     final titleHeight =
         MediaQuery.textScalerOf(context).scale(titleStyle.fontSize!) *
@@ -42,8 +52,9 @@ class _PosterCardState extends State<PosterCard> {
         CineNavigation.of(context)
             .openTitle(context, media, heroTag: widget.heroTag);
     final label =
-        '${media.title} ${media.year}'
-        '${media.rating > 0 ? ' · ${media.rating.toStringAsFixed(1)} ★' : ''}';
+        '${media.title} $year'
+        '${media.rating > 0 ? ' · ${media.rating.toStringAsFixed(1)} ★' : ''}'
+        '${creditRole == null ? '' : ' · $creditRole'}';
     return Semantics(
       label: label,
       button: true,
@@ -121,7 +132,7 @@ class _PosterCardState extends State<PosterCard> {
                 children: [
                   Expanded(
                     child: Text(
-                      media.year,
+                      year,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -140,6 +151,19 @@ class _PosterCardState extends State<PosterCard> {
                     ),
                 ],
               ),
+              if (creditRole != null) ...[
+                const SizedBox(height: 5),
+                Text(
+                  creditRole,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: muted,
+                    fontSize: 12,
+                    height: 1.3,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
