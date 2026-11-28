@@ -1,0 +1,14 @@
+{
+  "movies": [
+    {"id":27205,"title":"Inception","release_date":"2010-07-16","vote_average":8.4,"overview":"A team enters dreams to plant an idea.","runtime":148,"genre_ids":[28,878],"media_type":"movie"},
+    {"id":155,"title":"The Dark Knight","release_date":"2008-07-18","vote_average":8.5,"overview":"Batman faces the Joker.","runtime":152,"genre_ids":[28,80],"media_type":"movie"},
+    {"id":157336,"title":"Interstellar","release_date":"2014-11-07","vote_average":8.4,"overview":"A crew searches for a new home.","runtime":169,"genre_ids":[878],"media_type":"movie"}
+  ],
+  "tv": [
+    {"id":1396,"name":"Breaking Bad","first_air_date":"2008-01-20","vote_average":8.9,"number_of_seasons":5,"number_of_episodes":62,"genre_ids":[18],"media_type":"tv"}
+  ],
+  "genres": {
+    "movie": [{"id":28,"name":"Action"},{"id":878,"name":"Science Fiction"}],
+    "tv": [{"id":10759,"name":"Action & Adventure"},{"id":18,"name":"Drama"}]
+  }
+}

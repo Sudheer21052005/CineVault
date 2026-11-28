@@ -1,13 +1,23 @@
-<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
   <defs>
-    <linearGradient id="cinevaultDarkGradient" x1="12" y1="12" x2="88" y2="88" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#60A5FA"/>
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#1B2F50"/>
+      <stop offset="1" stop-color="#0A1121"/>
+    </linearGradient>
+    <linearGradient id="shutter" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#A2CEFF"/>
+      <stop offset=".48" stop-color="#6899FF"/>
+      <stop offset="1" stop-color="#7366ED"/>
+    </linearGradient>
+    <linearGradient id="aperture" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#FFE7A8"/>
+      <stop offset="1" stop-color="#EDAB55"/>
     </linearGradient>
   </defs>
-  <path d="M28 14 L72 14 C82 14 88 20 88 30 L88 36 L72 36 L72 30 C72 27 69 26 66 26 L34 26 C28 26 26 29 26 35 L26 65 C26 71 28 74 34 74 L66 74 C69 74 72 73 72 70 L72 64 L88 64 L88 70 C88 80 82 86 72 86 L28 86 C16 86 12 78 12 66 L12 34 C12 22 16 14 28 14 Z" fill="url(#cinevaultDarkGradient)"/>
-  <rect x="42" y="38" width="24" height="24" rx="4" fill="#0B0D12" stroke="#60A5FA" stroke-width="2.5"/>
-  <circle cx="54" cy="50" r="4.5" fill="#F4C95D"/>
-  <rect x="76" y="44" width="3" height="4" rx="1" fill="#60A5FA"/>
-  <rect x="76" y="52" width="3" height="4" rx="1" fill="#60A5FA"/>
+  <rect x="6" y="6" width="180" height="180" rx="46" fill="url(#field)" stroke="#36537A" stroke-width="2"/>
+  <rect x="14" y="14" width="164" height="164" rx="39" fill="none" stroke="#8DB6E9" stroke-opacity=".18" stroke-width="1"/>
+  <path d="M136 60a53 53 0 1 0 0 72" fill="none" stroke="url(#shutter)" stroke-width="18" stroke-linecap="round"/>
+  <path d="M47 115A53 53 0 0 1 50 69" fill="none" stroke="#C2DEFF" stroke-opacity=".47" stroke-width="2.3" stroke-linecap="round"/>
+  <path d="M89 73c0-3 3.4-4.8 5.9-3.2l35 23c2.3 1.5 2.3 4.9 0 6.4l-35 23c-2.5 1.6-5.9-.2-5.9-3.2z" fill="url(#aperture)"/>
+  <circle cx="153" cy="96" r="3" fill="#F4C47A"/>
 </svg>

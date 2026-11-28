@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cinevault/models/media.dart';
 import 'package:cinevault/models/watchlist_item.dart';
-import 'package:cinevault/services/tmdb_service.dart';
+import 'package:cinevault/catalogue/catalogue_repository.dart';
 
 void main() {
   test('TMDB media parsing preserves movie identity and optional fields', () {
