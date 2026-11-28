@@ -177,6 +177,7 @@ class Browser:
         self.network = []
         self.artwork_network = []
         self.request_ids = {}
+        self.trace_stream = None
         self.call("Page.enable")
         self.call("Network.enable")
         self.call("Page.addScriptToEvaluateOnNewDocument", source=DOM_HELPERS)
@@ -247,7 +248,9 @@ class Browser:
                 self.responses.pop(next(iter(self.responses)))
             return
         params = event.get("params", {})
-        if event.get("method") == "Fetch.requestPaused":
+        if event.get("method") == "Tracing.tracingComplete":
+            self.trace_stream = params.get("stream")
+        elif event.get("method") == "Fetch.requestPaused":
             url = urlsplit(params["request"]["url"])
             request = params["requestId"]
             if url.hostname == "api.themoviedb.org":
@@ -338,10 +341,10 @@ class Browser:
 
 
 @contextmanager
-def chrome(executable, origin, fixture_mode, artwork=False):
+def chrome(executable, origin, fixture_mode, artwork=False, hardware=False):
     with tempfile.TemporaryDirectory(prefix="cinevault-chrome-", ignore_cleanup_errors=True) as profile:
         browser = subprocess.Popen([
-            executable, "--headless=new", "--disable-gpu", "--no-first-run",
+            executable, "--headless=new", *([] if hardware else ["--disable-gpu"]), "--no-first-run",
             "--disable-default-apps", "--disable-background-networking",
             "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank",
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -366,6 +369,18 @@ def chrome(executable, origin, fixture_mode, artwork=False):
             with connect(url, max_size=2 * 1024 * 1024) as socket:
                 runner = Browser(socket, origin, fixture_mode, artwork)
                 try:
+                    if hardware:
+                        address = f"ws://127.0.0.1:{port}{lines[1]}"
+                        with connect(address, max_size=2 * 1024 * 1024) as diagnostics:
+                            diagnostics.send(json.dumps({"id": 1, "method": "SystemInfo.getInfo"}))
+                            gpu = json.loads(diagnostics.recv())["result"]["gpu"]
+                            if gpu["featureStatus"].get("gpu_compositing") != "enabled":
+                                raise RuntimeError("Chrome GPU compositing is unavailable")
+                            runner.gpu = {
+                                "renderer": gpu["auxAttributes"].get("glRenderer"),
+                                "compositing": gpu["featureStatus"]["gpu_compositing"],
+                                "rasterization": gpu["featureStatus"].get("rasterization"),
+                            }
                     yield runner
                 finally:
                     with suppress(ConnectionClosed, OSError):
