@@ -2,7 +2,7 @@
 
 CineVault brings cinema discovery, an interconnected movie and TV catalogue, and a personal viewing library to a single Flutter app. It uses a blue-and-gold interface with responsive desktop, tablet, and phone navigation.
 
-[Desktop catalogue](docs/screenshots/phase2/after-home-1440.jpg) · [Movie and TV exploration](docs/screenshots/phase3/web-mobile-gallery.jpg) · [Personal library on Android](docs/screenshots/phase4/android-overview.jpg)
+[Desktop catalogue](docs/screenshots/phase2/after-home-1440.jpg) · [Movie details on mobile](docs/screenshots/phase6/phone-detail.jpg) · [Fullscreen artwork](docs/screenshots/phase6/desktop-viewer.jpg) · [Personal library on Android](docs/screenshots/phase4/android-overview.jpg)
 
 ![CineVault Home with featured artwork and curated shelves](docs/screenshots/phase2/after-home-1440.jpg)
 
@@ -10,7 +10,8 @@ CineVault brings cinema discovery, an interconnected movie and TV catalogue, and
 
 - Explore curated movie and TV shelves, theatrical releases, and filtered catalogue results. Search for titles, people, collections, companies, and keywords, or look up a supported external ID.
 - Follow links among titles, full credits, person profiles, sortable filmographies, collections, studios, networks, genres, and keywords. Explore TV seasons, specials, episodes, stills, and guest stars.
-- Find release information, reviews, trailers, galleries, and regional streaming, rental, and purchase availability. Provider and trailer links open their original destinations.
+- Read storyline, director, cast, recommendations, and regional availability in a cinematic Overview. Sticky tabs keep the full credits, seasons, artwork, release information, and reviews within reach.
+- Browse backdrops, posters, portraits, and stills in a fullscreen viewer with swipe, keyboard controls, zoom, and original-image downloads.
 - Save movies and shows, keep custom lists, favorite titles and people, and revisit recent discoveries. Log repeat viewings with a rating, review, notes, and a date. Track watched episodes and see the next known unwatched episode.
 - Get explainable recommendations and upcoming picks from your library and TMDB relationships. Review viewing time, activity, genres, languages, countries, favorite people, and milestones.
 - Keep the personal library locally in Hive. Export a JSON backup or a CSV, or merge a backup into an existing library. On Web, a previously loaded app shell is needed for offline access when the site itself is unavailable.
@@ -20,11 +21,18 @@ CineVault brings cinema discovery, an interconnected movie and TV catalogue, and
 Use Flutter 3.50.1 with Dart 3.14.0 to reproduce the verified builds. Install the platform toolchain listed by `flutter doctor -v`.
 
 ```sh
-git clone https://github.com/nascent-sky/CineVault.git
+git clone https://github.com/Sudheer21052005/CineVault.git
 cd CineVault
-git switch feature/ui-redesign
-flutter pub get
 ```
+
+For the upgrade under review, fetch `feature/ui-redesign` from the contributor fork after cloning upstream.
+
+```sh
+git fetch https://github.com/nascent-sky/CineVault.git feature/ui-redesign
+git switch -c feature/ui-redesign FETCH_HEAD
+```
+
+Install the dependencies for the checked-out branch with `flutter pub get`.
 
 Copy [.env.example](.env.example) to `.env` and replace the placeholder with your own TMDB v3 API key. Start the app with that file explicitly. [TMDB registration and authentication](https://developer.themoviedb.org/docs/authentication-application)
 
@@ -67,7 +75,7 @@ The default Android APK uses debug signing for local QA. Supply an ignored `andr
 
 On hardware-accelerated Chrome, fresh title metadata improved from 169.3 to 133.1 ms at p95. The median share of animation callbacks over 16.7 ms during sustained scrolling fell from 3.36% to 2.72%. Cold Home p95 increased from 621.9 to 712.3 ms on the same test host. [Phase 5 results and reproduction](docs/PHASE5_RESULTS.md)
 
-[Upgrade roadmap](docs/UPGRADE_PLAN.md) · [Pull request summary for reviewers](docs/PULL_REQUEST_SUMMARY.md)
+[Upgrade roadmap](docs/UPGRADE_PLAN.md) · [Phase 6 visual verification](docs/PHASE6_RESULTS.md) · [Pull request summary for reviewers](docs/PULL_REQUEST_SUMMARY.md)
 
 ## Credits
 
