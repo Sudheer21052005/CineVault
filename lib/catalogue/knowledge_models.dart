@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../models/media.dart';
 import 'entity_ref.dart';
 
@@ -28,12 +30,19 @@ Uri? website(Object? value) {
 }
 
 class EntityLink {
-  const EntityLink(this.ref, this.name, {this.image, this.caption});
+  const EntityLink(
+    this.ref,
+    this.name, {
+    this.image,
+    this.caption,
+    this.knownFor = const {},
+  });
 
   final EntityRef ref;
   final String name;
   final String? image;
   final String? caption;
+  final Set<EntityRef> knownFor;
 
   static EntityLink? read(Json? source, EntityKind kind) {
     if (source == null) return null;
@@ -48,6 +57,20 @@ class EntityLink {
           text(source['poster_path']) ??
           text(source['logo_path']),
       caption: text(source['known_for_department']),
+      knownFor: kind == EntityKind.person
+          ? {
+              for (final title in objects(source['known_for']))
+                if (MediaKind.parse(text(title['media_type']))
+                    case final media?)
+                  if (integer(title['id']) case final id? when id > 0)
+                    (
+                      kind: media == MediaKind.movie
+                          ? EntityKind.movie
+                          : EntityKind.tv,
+                      id: id,
+                    ),
+            }
+          : const {},
     );
   }
 
@@ -103,6 +126,7 @@ typedef CreditRole = ({
   String role,
   String? department,
   int? episodes,
+  int? billing,
 });
 
 List<CreditRole> _roles(Json credit, {required bool cast}) {
@@ -117,6 +141,9 @@ List<CreditRole> _roles(Json credit, {required bool cast}) {
             text(entry[cast ? 'character' : 'job']) ?? (cast ? 'Cast' : 'Crew'),
         department: text(entry['department']) ?? text(credit['department']),
         episodes: integer(entry['episode_count']),
+        billing: cast
+            ? integer(entry['order']) ?? integer(credit['order'])
+            : null,
       ),
   ];
 }
@@ -158,6 +185,76 @@ List<PersonCredit>? readCredits(
 }
 
 typedef FilmCredit = ({Media title, List<CreditRole> roles});
+
+List<FilmCredit> rankKnownFor(
+  List<FilmCredit> credits, {
+  String? department,
+  Set<EntityRef> featured = const {},
+}) {
+  final profession = department?.toLowerCase();
+  final incidentalRole = RegExp(
+    r'\b(self|uncredited|archive footage)\b',
+    caseSensitive: false,
+  );
+  double relevance(FilmCredit credit) {
+    final title = credit.title;
+    final talk =
+        title.genreIds.contains(10767) || title.genreIds.contains(10763);
+    var strongest = double.negativeInfinity;
+    for (final role in credit.roles) {
+      final job = role.role.toLowerCase();
+      final episodes = math.max(0, role.episodes ?? 0);
+      final incidental = incidentalRole.hasMatch(job);
+      final aligned =
+          profession ==
+              (role.cast ? 'acting' : role.department?.toLowerCase()) &&
+          profession != null;
+      final billing = role.billing;
+      final prominence = role.cast
+          ? (billing != null && billing >= 0 ? 28 / (1 + billing / 4) : 9.0)
+          : switch (job) {
+              'director' ||
+              'creator' ||
+              'screenplay' ||
+              'writer' ||
+              'original music composer' => 24.0,
+              'producer' ||
+              'executive producer' ||
+              'director of photography' ||
+              'editor' => 16.0,
+              _ => 6.0,
+            };
+      final recurring = title.isMovie
+          ? 0.0
+          : math.min(31.0, math.log(episodes + 1) * 8);
+      final penalty =
+          (incidental ? 23 : 0) +
+          (talk ? 24 : 0) +
+          (!title.isMovie && episodes == 1 ? 8 : 0);
+      strongest = math.max(
+        strongest,
+        prominence + recurring + (aligned ? 8 : 0) - penalty,
+      );
+    }
+    final votes = math.max(0, title.voteCount);
+    return strongest +
+        (featured.contains(title.ref) ? 20 : 0) +
+        math.min(12, math.log(1 + math.max(0, title.popularity)) * 2) +
+        math.min(10, math.log(1 + votes)) +
+        (title.rating - 5) * 3 * votes / (votes + 120);
+  }
+
+  final scored = [
+    for (final credit in credits) (credit: credit, score: relevance(credit)),
+  ];
+  scored.sort((a, b) {
+    final comparison = b.score.compareTo(a.score);
+    return comparison != 0
+        ? comparison
+        : a.credit.title.key.compareTo(b.credit.title.key);
+  });
+  return [for (final row in scored) row.credit];
+}
 
 List<FilmCredit>? readFilmography(Json source) {
   if (source['cast'] is! List && source['crew'] is! List) return null;

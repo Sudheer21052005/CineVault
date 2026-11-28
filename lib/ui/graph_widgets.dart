@@ -242,8 +242,12 @@ class _GraphLoadState<T> extends State<GraphLoad<T>> {
         return _status(
           MessageState(
             message: catalogueError(snapshot.error),
-            onRetry: () =>
-                setState(() => _request = widget.load(refresh: true)),
+            onRetry: () {
+              final retry = widget.load(refresh: true);
+              setState(() {
+                _request = retry;
+              });
+            },
           ),
         );
       }

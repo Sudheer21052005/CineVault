@@ -128,11 +128,26 @@ class PersonPage extends StatelessWidget {
             ),
             CineSliver(
               bottom: 16,
-              child: GraphLoad<Json>(
-                load: ({required refresh}) =>
-                    repository.filmography(ref.id, refresh: refresh),
-                builder: (context, data) {
-                  final films = readFilmography(data);
+              child: GraphLoad<List<FilmCredit>?>(
+                load: ({required refresh}) async {
+                  final featured = repository
+                      .personKnownFor(ref, name)
+                      .timeout(
+                        const Duration(milliseconds: 650),
+                        onTimeout: () => const {},
+                      );
+                  final films = readFilmography(
+                    await repository.filmography(ref.id, refresh: refresh),
+                  );
+                  return films == null
+                      ? null
+                      : rankKnownFor(
+                          films,
+                          department: text(person['known_for_department']),
+                          featured: await featured,
+                        );
+                },
+                builder: (context, films) {
                   if (films == null || films.isEmpty) {
                     return GraphMessage(
                       films == null
@@ -140,13 +155,13 @@ class PersonPage extends StatelessWidget {
                           : 'TMDB lists no known credits.',
                     );
                   }
-                  final popular = const FilmographyFilter()
-                      .apply(films)
-                      .take(12);
                   return PosterShelf(
                     title: 'Known for',
                     shelfId: 'person-${ref.id}-known',
-                    items: popular.map((credit) => credit.title).toList(),
+                    items: films
+                        .take(12)
+                        .map((credit) => credit.title)
+                        .toList(),
                     trailing: GraphLink(
                       'Filmography',
                       FilmographyRoute(ref.id),

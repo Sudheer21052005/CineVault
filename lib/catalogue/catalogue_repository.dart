@@ -390,6 +390,20 @@ class CatalogueRepository {
   Future<Json> filmography(int personId, {bool refresh = false}) =>
       _knowledge('/person/$personId/combined_credits', refresh: refresh);
 
+  Future<Set<EntityRef>> personKnownFor(EntityRef ref, String name) async {
+    try {
+      final results = await universalSearch(name, SearchScope.person);
+      for (final hit in results.items) {
+        if (hit.entity case final person? when person.ref == ref) {
+          return person.knownFor;
+        }
+      }
+    } on TmdbException {
+      // Combined credits can still rank the shelf when search is unavailable.
+    }
+    return const {};
+  }
+
   Future<Json> season(SeasonRef ref, {bool refresh = false}) => _knowledge(
     '/tv/${ref.seriesId}/season/${ref.seasonNumber}',
     query: const {'append_to_response': 'external_ids'},

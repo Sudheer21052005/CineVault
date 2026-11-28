@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cinevault/app/application.dart';
@@ -10,6 +11,7 @@ import 'package:cinevault/core/network/tmdb_transport.dart';
 import 'package:cinevault/core/performance.dart';
 import 'package:cinevault/library/library_repository.dart';
 import 'package:cinevault/providers/watchlist_provider.dart';
+import 'package:cinevault/ui/media_sections.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -330,6 +332,155 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  test(
+    'Known for prefers defining and credited work over talk show guests',
+    () {
+      final films = readFilmography({
+        'cast': [
+          {
+            'id': 1,
+            'media_type': 'tv',
+            'name': 'Guest Hour',
+            'character': 'Self',
+            'episode_count': 1,
+            'genre_ids': [10767],
+            'order': 0,
+            'popularity': 900,
+            'vote_count': 8000,
+            'vote_average': 9.1,
+          },
+          {
+            'id': 2,
+            'media_type': 'tv',
+            'name': 'Recurring Series',
+            'character': 'Lead',
+            'episode_count': 34,
+            'order': 2,
+            'popularity': 40,
+            'vote_count': 200,
+            'vote_average': 8.1,
+          },
+          {
+            'id': 3,
+            'media_type': 'movie',
+            'title': 'Leading Film',
+            'character': 'Lead',
+            'order': 0,
+            'popularity': 16,
+            'vote_count': 320,
+            'vote_average': 7.9,
+          },
+        ],
+      })!;
+      expect(const FilmographyFilter().apply(films).first.title.id, 1);
+      expect(
+        rankKnownFor(films, department: 'Acting').map((row) => row.title.id),
+        [2, 3, 1],
+      );
+      expect(
+        rankKnownFor(
+          films,
+          department: 'Acting',
+          featured: {(kind: EntityKind.movie, id: 3)},
+        ).map((row) => row.title.id),
+        [3, 2, 1],
+      );
+    },
+  );
+
+  testWidgets(
+    'pinned tabs stay fixed when a short reviews section loads and restore Overview offset',
+    (tester) async {
+      final reply = Completer<http.Response>();
+      final harness = _Harness()..review = () => reply.future;
+      await harness.mount(tester, '/movie/27205', size: const Size(1440, 580));
+      final anchor = find.text('Reviews');
+      final viewport = find.byType(CustomScrollView).first;
+      final controller = tester.widget<CustomScrollView>(viewport).controller!;
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      final start = controller.offset;
+      final y = tester.getTopLeft(anchor).dy;
+      await tester.tap(anchor);
+      await tester.pump();
+      expect(find.text('Loading viewer reviews…'), findsOneWidget);
+      expect(tester.getTopLeft(anchor).dy, closeTo(y, 1));
+      reply.complete(
+        http.Response(
+          jsonEncode({
+            'results': [
+              {
+                'author': 'Viewer',
+                'author_details': {'rating': 8},
+                'created_at': '2022-07-15T12:00:00Z',
+                'content': 'Clear and thoughtful.',
+              },
+            ],
+          }),
+          200,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('8 / 10'), findsOneWidget);
+      await tester.tap(find.text('Viewer'));
+      await tester.pumpAndSettle();
+      expect(find.byType(SelectableText), findsOneWidget);
+      expect(tester.getTopLeft(anchor).dy, closeTo(y, 1));
+      await tester.tap(find.text('Overview'));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(anchor).dy, closeTo(y, 1));
+      expect(controller.offset, closeTo(start, 2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('reviews retry an error and distinguish an empty result', (
+    tester,
+  ) async {
+    var calls = 0;
+    final harness = _Harness()
+      ..review = () async => ++calls == 1
+          ? http.Response('{}', 404)
+          : http.Response('{"results":[]}', 200);
+    await harness.mount(tester, '/movie/27205');
+    await _tap(tester, 'Reviews');
+    await _tap(tester, 'Retry');
+    expect(find.text('TMDB lists no reviews.'), findsOneWidget);
+    expect(calls, 2);
+  });
+
+  testWidgets(
+    'Overview keeps watch availability mounted through viewport re-entry',
+    (tester) async {
+      final harness = _Harness()..overviewFixture = true;
+      await harness.mount(tester, '/tv/1396', size: const Size(390, 400));
+      final viewport = find.byType(CustomScrollView).first;
+      final controller = tester.widget<CustomScrollView>(viewport).controller!;
+      await tester.scrollUntilVisible(
+        find.text('Where to watch'),
+        140,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      final provider = find.byType(WatchAvailability, skipOffstage: false);
+      final original = tester.state(provider);
+      final position = controller.offset;
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(tester.state(provider), same(original));
+      for (var step = 0; step < 20 && controller.offset > position; step++) {
+        final offset = (controller.offset - 38).clamp(
+          position,
+          controller.offset,
+        );
+        controller.jumpTo(offset);
+        await tester.pumpAndSettle();
+        expect(controller.offset, closeTo(offset, 1));
+      }
+      expect(tester.state(provider), same(original));
+    },
+  );
 }
 
 Future<void> _tap(
@@ -346,6 +497,8 @@ Future<void> _tap(
 }
 
 class _Harness {
+  Future<http.Response> Function()? review;
+  bool overviewFixture = false;
   final base = TmdbFixture();
   final requests = <Uri>[];
   final performance = AppPerformance();
@@ -359,6 +512,21 @@ class _Harness {
   Future<http.Response> _respond(http.Request request) async {
     requests.add(request.url);
     final path = request.url.path;
+    if (path == '/3/movie/27205/reviews' && review != null) return review!();
+    if (overviewFixture) {
+      final payload = switch (path) {
+        '/3/tv/1396/watch/providers' => {
+          'results': {'US': {}},
+        },
+        '/3/tv/1396/recommendations' || '/3/tv/1396/similar' => {
+          'results': [
+            for (var i = 1; i < 12; i++) {'id': i, 'name': 'Series $i'},
+          ],
+        },
+        _ => null,
+      };
+      if (payload != null) return http.Response(jsonEncode(payload), 200);
+    }
     final firstEpisode = {
       'name': 'Pilot',
       'episode_number': 1,

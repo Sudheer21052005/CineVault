@@ -697,6 +697,19 @@ class _ReviewsState extends State<_Reviews> {
       page: _page,
       refresh: refresh,
     ),
+    loading: (_) => const Padding(
+      padding: EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 12),
+          Text('Loading viewer reviews…'),
+        ],
+      ),
+    ),
     builder: (context, data) {
       if (data['results'] is! List) {
         return const GraphMessage('Review metadata is unavailable.');
@@ -710,31 +723,15 @@ class _ReviewsState extends State<_Reviews> {
           _BatchedRows(
             key: ValueKey(_page),
             count: list.length,
-            item: (index) {
-              final review = list[index];
-              final rating = object(review['author_details'])?['rating'];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  title: Text(text(review['author']) ?? 'TMDB user'),
-                  subtitle: Text(
-                    [
-                      ?text(review['created_at'])?.split('T').first,
-                      if (rating is num) '$rating / 10',
-                    ].join(' · '),
-                  ),
-                  expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      text(review['content']) ?? 'Review text is unavailable.',
-                    ),
-                    if (website(review['url']) case final url?)
-                      ExternalLink('Read on TMDB', url),
-                  ],
-                ),
-              );
-            },
+            item: (index) => _ReviewCard(
+              key: PageStorageKey((
+                'review',
+                _page,
+                index,
+                text(list[index]['id']),
+              )),
+              review: list[index],
+            ),
           ),
           if (total > 1)
             Wrap(
@@ -758,6 +755,120 @@ class _ReviewsState extends State<_Reviews> {
       );
     },
   );
+}
+
+class _ReviewCard extends StatefulWidget {
+  const _ReviewCard({super.key, required this.review});
+  final Json review;
+
+  @override
+  State<_ReviewCard> createState() => _ReviewCardState();
+}
+
+class _ReviewCardState extends State<_ReviewCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final review = widget.review;
+    final author = object(review['author_details']);
+    final rating = author?['rating'];
+    final date = DateTime.tryParse(text(review['created_at']) ?? '');
+    final body = text(review['content']) ?? 'Review text is unavailable.';
+    final information = [
+      if (rating is num && rating >= 0 && rating <= 10) '$rating / 10',
+      if (date != null)
+        MaterialLocalizations.of(context).formatFullDate(date),
+    ];
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(13),
+      side: const BorderSide(color: outline),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: canvas,
+        shape: shape,
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Semantics(
+              expanded: _expanded,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 9,
+                ),
+                onTap: () => setState(() => _expanded = !_expanded),
+                trailing: AnimatedRotation(
+                  turns: _expanded ? .5 : 0,
+                  duration: cineMotion(context),
+                  child: const Icon(Icons.expand_more_rounded),
+                ),
+                title: Text(
+                  text(review['author']) ??
+                      text(author?['username']) ??
+                      'TMDB user',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: ink,
+                  ),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (information.isNotEmpty)
+                        Text(
+                          information.join(' · '),
+                          style: const TextStyle(color: gold),
+                        ),
+                      if (!_expanded)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            body,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: muted, height: 1.45),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            AnimatedSize(
+              duration: cineMotion(context),
+              alignment: Alignment.topCenter,
+              child: _expanded
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SelectableText(
+                            body,
+                            style: const TextStyle(color: ink, height: 1.55),
+                          ),
+                          if (website(review['url']) case final url?)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: ExternalLink('Read on TMDB', url),
+                            ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _BatchedRows extends StatefulWidget {
@@ -944,6 +1055,7 @@ class _Translations extends StatelessWidget {
         final localTitle = text(content?['title']) ?? text(content?['name']);
         final code = text(record['iso_3166_1']);
         return ExpansionTile(
+          key: PageStorageKey(('translation', index)),
           tilePadding: EdgeInsets.zero,
           title: Text('$name${code == null ? '' : ' · $code'}'),
           subtitle: localTitle == null ? null : Text(localTitle),

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/rendering.dart' show RenderSliver;
 import 'package:provider/provider.dart';
 
 import '../app/navigation_scope.dart';
@@ -36,8 +37,9 @@ class MediaDetailsPage extends StatefulWidget {
 
 class _MediaDetailsPageState extends State<MediaDetailsPage> {
   late final _catalogue = context.read<CatalogueRepository>();
-  final _scroll = ScrollController();
+  final _scroll = _TitleScrollController();
   final _tabAnchor = GlobalKey();
+  final _sectionOffsets = <TitleSection, double>{};
   final _palette = ValueNotifier<Color>(const Color(0xFF314D76));
   TitleSection _section = TitleSection.overview;
   late Future<TitleKnowledge> _request;
@@ -72,19 +74,20 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
 
   void _select(TitleSection section) {
     if (_section == section) return;
+    final header = _tabAnchor.currentContext?.findRenderObject();
+    if (_scroll.hasClients && header is RenderSliver) {
+      final pinOffset = header.constraints.precedingScrollExtent;
+      final pixels = _scroll.position.pixels;
+      _sectionOffsets[_section] = math.max(0, pixels - pinOffset);
+      _scroll.restoreAtLayout(
+        pixels >= pinOffset
+            ? pinOffset + (_sectionOffsets[section] ?? 0)
+            : pixels,
+      );
+    }
     setState(() => _section = section);
     PageStorage.maybeOf(context)
         ?.writeState(context, section, identifier: 'title-selected-section');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final anchor = _tabAnchor.currentContext;
-      if (mounted && _section == section && anchor != null) {
-        Scrollable.ensureVisible(
-          anchor,
-          duration: cineMotion(context, 180),
-          curve: Curves.easeOutCubic,
-        );
-      }
-    });
   }
 
   @override
@@ -109,17 +112,52 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
               widget.ref.kind == EntityKind.tv)
             section,
       ];
-      final blocks = <WidgetBuilder>[
-        if (item != null &&
-            (_section == TitleSection.overview ||
-                _section == TitleSection.details))
-          (_) => _DetailOverview(
-            media: item,
-            raw: _section == TitleSection.details ? knowledge?.data : null,
-            showStory: _section == TitleSection.overview,
+      final tabHeight =
+          (MediaQuery.textScalerOf(context).scale(14) / 14 * 23 + 29).clamp(
+            52.0,
+            94.0,
+          );
+      Widget sectionBody(TitleSection section) {
+        final blocks = <WidgetBuilder>[
+          if (item != null &&
+              (section == TitleSection.overview ||
+                  section == TitleSection.details))
+            (_) => _DetailOverview(
+              media: item,
+              raw: section == TitleSection.details ? knowledge?.data : null,
+              showStory: section == TitleSection.overview,
+            ),
+          if (knowledge != null) ...titleSectionBlocks(knowledge, section),
+        ];
+        return SliverPadding(
+          key: ValueKey(section),
+          padding: EdgeInsets.fromLTRB(
+            CineLayout.gutterOf(context),
+            19,
+            CineLayout.gutterOf(context),
+            12,
           ),
-        if (knowledge != null) ...titleSectionBlocks(knowledge, _section),
-      ];
+          sliver: SliverList.builder(
+            itemCount: blocks.length,
+            itemBuilder: (context, index) => _RetainedTitleBlock(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 24),
+                child: section == TitleSection.overview
+                    ? blocks[index](context)
+                    : TweenAnimationBuilder<double>(
+                        duration: cineMotion(context, 155),
+                        tween: Tween(begin: .88, end: 1),
+                        curve: Curves.easeOutCubic,
+                        child: blocks[index](context),
+                        builder: (_, opacity, child) =>
+                            Opacity(opacity: opacity, child: child),
+                      ),
+              ),
+            ),
+          ),
+        );
+      }
+
       return ValueListenableBuilder<Color>(
         valueListenable: _palette,
         child: CinePage(
@@ -159,24 +197,25 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
                 child: MessageState(
                   icon: Icons.cloud_off_rounded,
                   message: catalogueError(snapshot.error),
-                  onRetry: () =>
-                      setState(() => _request = _fetch(refresh: true)),
+                  onRetry: () {
+                    final retry = _fetch(refresh: true);
+                    setState(() {
+                      _request = retry;
+                    });
+                  },
                 ),
               ),
             if (!compact && personal != null)
               CineSliver(bottom: 9, child: personal),
             if (item != null)
               SliverPersistentHeader(
+                key: _tabAnchor,
                 pinned: true,
                 delegate: _TitleTabHeader(
-                  anchor: _tabAnchor,
                   sections: sections,
                   active: _section,
                   onSelect: _select,
-                  height:
-                      (MediaQuery.textScalerOf(context).scale(14) / 14 * 23 +
-                              29)
-                          .clamp(52.0, 94.0),
+                  height: tabHeight,
                   gutter: CineLayout.gutterOf(context),
                 ),
               ),
@@ -185,32 +224,39 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
                 _section != TitleSection.overview &&
                 !snapshot.hasError)
               const CineSliver(top: 14, child: CineSkeleton(height: 120)),
-            if (blocks.isNotEmpty)
-              SliverPadding(
-                key: ValueKey(_section),
-                padding: EdgeInsets.fromLTRB(
-                  CineLayout.gutterOf(context),
-                  19,
-                  CineLayout.gutterOf(context),
-                  12,
-                ),
-                sliver: SliverList.builder(
-                  itemCount: blocks.length,
-                  itemBuilder: (context, index) => Padding(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    child: _section == TitleSection.overview
-                        ? blocks[index](context)
-                        : TweenAnimationBuilder<double>(
-                            duration: cineMotion(context, 155),
-                            tween: Tween(begin: .88, end: 1),
-                            curve: Curves.easeOutCubic,
-                            child: blocks[index](context),
-                            builder: (_, opacity, child) =>
-                                Opacity(opacity: opacity, child: child),
-                          ),
+            if (item != null) ...[
+              if (_section == TitleSection.overview ||
+                  _sectionOffsets.containsKey(TitleSection.overview))
+                SliverOffstage(
+                  offstage: _section != TitleSection.overview,
+                  sliver: TickerMode(
+                    enabled: _section == TitleSection.overview,
+                    child: ExcludeFocus(
+                      excluding: _section != TitleSection.overview,
+                      child: sectionBody(TitleSection.overview),
+                    ),
                   ),
                 ),
+              if (_section != TitleSection.overview) sectionBody(_section),
+              // Short tabs must still allow the header to remain pinned.
+              SliverLayoutBuilder(
+                builder: (_, tail) {
+                  final header = _tabAnchor.currentContext?.findRenderObject();
+                  final pinOffset = header is RenderSliver
+                      ? header.constraints.precedingScrollExtent
+                      : 0.0;
+                  return SliverToBoxAdapter(
+                    child: SizedBox(
+                      height: math.max(
+                        0,
+                        tail.viewportMainAxisExtent -
+                            (tail.precedingScrollExtent - pinOffset),
+                      ),
+                    ),
+                  );
+                },
               ),
+            ],
           ],
         ),
         builder: (context, tone, child) => AnimatedContainer(
@@ -232,16 +278,75 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
   );
 }
 
+// Keep the few lazily mounted blocks alive within the selected section.
+// Re-entering a block reuses its resolved content and measured extent.
+class _RetainedTitleBlock extends StatefulWidget {
+  const _RetainedTitleBlock({required this.child});
+  final Widget child;
+
+  @override
+  State<_RetainedTitleBlock> createState() => _RetainedTitleBlockState();
+}
+
+class _RetainedTitleBlockState extends State<_RetainedTitleBlock>
+    with AutomaticKeepAliveClientMixin<_RetainedTitleBlock> {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+class _TitleScrollController extends ScrollController {
+  void restoreAtLayout(double offset) {
+    final current = position as _TitleScrollPosition;
+    current.goIdle();
+    current.nextOffset = offset;
+  }
+
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) => _TitleScrollPosition(physics, context, oldPosition);
+}
+
+class _TitleScrollPosition extends ScrollPositionWithSingleContext {
+  _TitleScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) : super(physics: physics, context: context, oldPosition: oldPosition);
+
+  double? nextOffset;
+
+  @override
+  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    final target = nextOffset;
+    nextOffset = null;
+    if (target != null) {
+      final offset = target.clamp(minScrollExtent, maxScrollExtent);
+      if (offset != pixels) {
+        correctPixels(offset);
+        return false;
+      }
+    }
+    return super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+  }
+}
+
 class _TitleTabHeader extends SliverPersistentHeaderDelegate {
   const _TitleTabHeader({
-    required this.anchor,
     required this.sections,
     required this.active,
     required this.onSelect,
     required this.height,
     required this.gutter,
   });
-  final GlobalKey anchor;
   final List<TitleSection> sections;
   final TitleSection active;
   final ValueChanged<TitleSection> onSelect;
@@ -264,7 +369,6 @@ class _TitleTabHeader extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) => Material(
-    key: anchor,
     color: const Color(0xFF111A29),
     child: Container(
       height: height,
